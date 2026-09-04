@@ -21,6 +21,7 @@ use function PluginCity\Harness\ensure_basic_shipping;
 use function PluginCity\Harness\error_log_contents;
 use function PluginCity\Harness\finish;
 use function PluginCity\Harness\hpos_is_enabled;
+use function PluginCity\Harness\internal_http;
 use function PluginCity\Harness\logs_contain_fatal;
 use function PluginCity\Harness\mounted_plugin_slug;
 use function PluginCity\Harness\plugin_basename_from_slug;
@@ -57,36 +58,17 @@ if ( 'disabled' === $hpos_mode ) {
 
 suite( 'Admin and storefront HTTP' );
 clear_error_logs();
-$login = wp_remote_get(
-	'http://wordpress/wp-login.php',
-	array(
-		'timeout'  => 15,
-		'sslverify' => false,
-	)
-);
-assert_true( ! is_wp_error( $login ), 'wp-login.php request succeeded' );
-assert_same( 200, (int) wp_remote_retrieve_response_code( $login ), 'wp-login.php returns HTTP 200' );
+$login = internal_http( '/wp-login.php' );
+assert_true( ! $login['error'], 'wp-login.php request succeeded' . ( $login['message'] ? ' (' . $login['message'] . ')' : '' ) );
+assert_same( 200, $login['code'], 'wp-login.php returns HTTP 200' );
 
-$admin = wp_remote_get(
-	'http://wordpress/wp-admin/',
-	array(
-		'timeout'     => 15,
-		'sslverify'    => false,
-		'redirection' => 0,
-	)
-);
-$admin_code = is_wp_error( $admin ) ? 0 : (int) wp_remote_retrieve_response_code( $admin );
-assert_true( in_array( $admin_code, array( 200, 302 ), true ), 'wp-admin responds (200 or login redirect)' );
+$admin = internal_http( '/wp-admin/' );
+assert_true( ! $admin['error'], 'wp-admin request succeeded' );
+assert_true( in_array( $admin['code'], array( 200, 301, 302 ), true ), 'wp-admin responds (200 or redirect)' );
 
-$home = wp_remote_get(
-	'http://wordpress/',
-	array(
-		'timeout'  => 15,
-		'sslverify' => false,
-	)
-);
-assert_true( ! is_wp_error( $home ), 'Storefront request succeeded' );
-assert_true( (int) wp_remote_retrieve_response_code( $home ) < 500, 'Storefront does not return a server error' );
+$home = internal_http( '/' );
+assert_true( ! $home['error'], 'Storefront request succeeded' . ( $home['message'] ? ' (' . $home['message'] . ')' : '' ) );
+assert_true( in_array( $home['code'], array( 200, 301, 302 ), true ), 'Storefront responds without a server error' );
 
 suite( 'Bootstrap error log' );
 assert_true( ! logs_contain_fatal(), 'No PHP fatal or parse error after HTTP bootstrap' );

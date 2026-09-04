@@ -26,11 +26,10 @@ services:
       WORDPRESS_DB_NAME: wordpress
       WORDPRESS_DEBUG: "1"
       WORDPRESS_CONFIG_EXTRA: |
-        define('WP_DEBUG', true);
-        define('WP_DEBUG_LOG', true);
-        define('WP_DEBUG_DISPLAY', false);
-        define('SCRIPT_DEBUG', false);
-        define('PC_HARNESS_ROOT', '/opt/pc-harness');
+        if ( ! defined( 'WP_DEBUG_LOG' ) ) { define('WP_DEBUG_LOG', true); }
+        if ( ! defined( 'WP_DEBUG_DISPLAY' ) ) { define('WP_DEBUG_DISPLAY', false); }
+        if ( ! defined( 'SCRIPT_DEBUG' ) ) { define('SCRIPT_DEBUG', false); }
+        if ( ! defined( 'PC_HARNESS_ROOT' ) ) { define('PC_HARNESS_ROOT', '/opt/pc-harness'); }
     volumes:
       - wp_data:/var/www/html
       - ${PLUGIN_PATH:?PLUGIN_PATH is required}:/var/www/html/wp-content/plugins/${PLUGIN_SLUG:?PLUGIN_SLUG is required}

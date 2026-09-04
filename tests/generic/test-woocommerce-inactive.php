@@ -9,6 +9,7 @@ require_once dirname( __DIR__ ) . '/helpers/load.php';
 
 use function PluginCity\Harness\assert_true;
 use function PluginCity\Harness\finish;
+use function PluginCity\Harness\internal_http;
 use function PluginCity\Harness\logs_contain_fatal;
 use function PluginCity\Harness\suite;
 
@@ -22,15 +23,9 @@ assert_true( ! class_exists( 'WooCommerce', false ), 'WooCommerce class is not l
 assert_true( ! is_plugin_active( 'woocommerce/woocommerce.php' ), 'WooCommerce plugin is inactive' );
 assert_true( ! logs_contain_fatal(), 'Mounted plugin does not fatal when WooCommerce is inactive' );
 
-$home = wp_remote_get(
-	'http://wordpress/',
-	array(
-		'timeout'  => 15,
-		'sslverify' => false,
-	)
-);
-assert_true( ! is_wp_error( $home ), 'Storefront request works with WooCommerce inactive' );
-assert_true( (int) wp_remote_retrieve_response_code( $home ) < 500, 'Storefront does not 500 with WooCommerce inactive' );
+$home = internal_http( '/' );
+assert_true( ! $home['error'], 'Storefront request works with WooCommerce inactive' );
+assert_true( in_array( $home['code'], array( 200, 301, 302 ), true ), 'Storefront does not 500 with WooCommerce inactive' );
 assert_true( ! logs_contain_fatal(), 'No PHP fatal after storefront request with WooCommerce inactive' );
 
 finish();
