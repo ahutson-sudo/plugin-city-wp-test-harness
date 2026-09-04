@@ -1,0 +1,32 @@
+# Copy this file into a plugin repository as .github/workflows/tests.yml
+# Change the `uses:` repo to wherever this harness is published, and set plugin-slug.
+
+name: Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: OWNER/plugin-city-wp-test-harness@v1
+        with:
+          plugin-slug: your-plugin-slug
+          php-version: "8.3"
+          wp-version: latest
+          wc-version: latest
+          hpos-mode: enabled
+
+  # Optional extra jobs. Keep this list small.
+  hpos-off:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: OWNER/plugin-city-wp-test-harness@v1
+        with:
+          plugin-slug: your-plugin-slug
+          hpos-mode: disabled

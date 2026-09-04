@@ -1,0 +1,72 @@
+# Copy into a plugin repository as .github/workflows/plugin-tests.yml
+# and point `repository` at the harness repo.
+
+name: Plugin City WP tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  default:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Checkout harness
+        uses: actions/checkout@v4
+        with:
+          repository: plugincity/plugin-city-wp-test-harness
+          path: harness
+
+      - name: Run harness
+        working-directory: harness
+        env:
+          PLUGIN_PATH: ${{ github.workspace }}/plugin
+          PLUGIN_SLUG: ${{ github.event.repository.name }}
+          WP_VERSION: latest
+          WC_VERSION: latest
+          PHP_VERSION: "8.3"
+          HPOS_MODE: enabled
+        run: ./scripts/run-tests.sh
+
+  matrix:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: "8.3"
+            wp: latest
+            wc: latest
+            hpos: enabled
+          - php: "8.3"
+            wp: latest
+            wc: latest
+            hpos: disabled
+          - php: "8.1"
+            wp: latest
+            wc: latest
+            hpos: enabled
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+      - uses: actions/checkout@v4
+        with:
+          repository: plugincity/plugin-city-wp-test-harness
+          path: harness
+      - working-directory: harness
+        env:
+          PLUGIN_PATH: ${{ github.workspace }}/plugin
+          PLUGIN_SLUG: ${{ github.event.repository.name }}
+          WP_VERSION: ${{ matrix.wp }}
+          WC_VERSION: ${{ matrix.wc }}
+          PHP_VERSION: ${{ matrix.php }}
+          HPOS_MODE: ${{ matrix.hpos }}
+        run: ./scripts/run-tests.sh

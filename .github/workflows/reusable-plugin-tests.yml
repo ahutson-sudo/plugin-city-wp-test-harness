@@ -1,0 +1,69 @@
+name: Reusable plugin tests
+
+on:
+  workflow_call:
+    inputs:
+      plugin-slug:
+        description: Plugin directory name under wp-content/plugins.
+        required: true
+        type: string
+      plugin-path:
+        description: Plugin path relative to the caller repository root.
+        required: false
+        type: string
+        default: "."
+      php-version:
+        required: false
+        type: string
+        default: "8.3"
+      wp-version:
+        required: false
+        type: string
+        default: latest
+      wc-version:
+        required: false
+        type: string
+        default: latest
+      hpos-mode:
+        required: false
+        type: string
+        default: enabled
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Locate this harness repository
+        id: harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw="${GITHUB_WORKFLOW_REF}"
+          repo="${raw%%/.github/*}"
+          ref="${raw##*@}"
+          ref="${ref#refs/heads/}"
+          ref="${ref#refs/tags/}"
+          echo "repo=${repo}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout harness
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.harness.outputs.repo }}
+          ref: ${{ steps.harness.outputs.ref }}
+          path: harness
+
+      - name: Run Plugin City harness
+        uses: ./harness
+        with:
+          plugin-slug: ${{ inputs.plugin-slug }}
+          plugin-path: ${{ github.workspace }}/plugin/${{ inputs.plugin-path }}
+          php-version: ${{ inputs.php-version }}
+          wp-version: ${{ inputs.wp-version }}
+          wc-version: ${{ inputs.wc-version }}
+          hpos-mode: ${{ inputs.hpos-mode }}

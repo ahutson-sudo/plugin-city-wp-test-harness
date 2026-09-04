@@ -1,0 +1,72 @@
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  wordpress:
+    image: wordpress:${WP_IMAGE_TAG:-php8.3-apache}
+    ports:
+      - "${WP_PORT:-8080}:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DEBUG: "1"
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_DEBUG', true);
+        define('WP_DEBUG_LOG', true);
+        define('WP_DEBUG_DISPLAY', false);
+        define('SCRIPT_DEBUG', false);
+        define('PC_HARNESS_ROOT', '/opt/pc-harness');
+    volumes:
+      - wp_data:/var/www/html
+      - ${PLUGIN_PATH:?PLUGIN_PATH is required}:/var/www/html/wp-content/plugins/${PLUGIN_SLUG:?PLUGIN_SLUG is required}
+      - ./tests:/opt/pc-harness/tests:ro
+      - ./scripts:/opt/pc-harness/scripts:ro
+      - ./docker/php.ini:/usr/local/etc/php/conf.d/pc-harness.ini:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  wpcli:
+    image: wordpress:${WPCLI_IMAGE_TAG:-cli-php8.3}
+    user: "33:33"
+    working_dir: /var/www/html
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      PLUGIN_SLUG: ${PLUGIN_SLUG:-}
+      HPOS_MODE: ${HPOS_MODE:-enabled}
+      PC_HARNESS_ROOT: /opt/pc-harness
+    volumes:
+      - wp_data:/var/www/html
+      - ${PLUGIN_PATH:?PLUGIN_PATH is required}:/var/www/html/wp-content/plugins/${PLUGIN_SLUG:?PLUGIN_SLUG is required}
+      - ./tests:/opt/pc-harness/tests:ro
+      - ./scripts:/opt/pc-harness/scripts:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      wordpress:
+        condition: service_started
+    entrypoint: ["wp", "--allow-root", "--path=/var/www/html"]
+    restart: "no"
+
+volumes:
+  db_data:
+  wp_data:

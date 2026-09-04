@@ -1,0 +1,31 @@
+name: Harness self-test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax-check scripts and PHP
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh; do bash -n "$f"; done
+          find . -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run harness against the sample fixture plugin
+        uses: ./
+        with:
+          plugin-slug: sample-plugin
+          plugin-path: fixtures/sample-plugin
+          php-version: "8.3"
+          wp-version: latest
+          wc-version: latest
+          hpos-mode: enabled

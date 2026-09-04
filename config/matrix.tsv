@@ -1,0 +1,8 @@
+# Default matrix. Not a full Cartesian product.
+# php	wp	wc	hpos
+8.3	latest	latest	enabled
+8.3	latest	latest	disabled
+8.1	latest	latest	enabled
+8.4	latest	latest	enabled
+8.3	6.7	latest	enabled
+8.3	latest	10.0.0	enabled

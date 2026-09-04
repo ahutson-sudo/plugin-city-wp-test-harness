@@ -1,0 +1,69 @@
+name: Plugin City WP Test Harness
+description: Mount a WordPress plugin into a disposable WordPress/WooCommerce environment and run generic plus plugin-specific tests.
+author: Plugin City
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  plugin-slug:
+    description: Plugin directory name under wp-content/plugins.
+    required: true
+  plugin-path:
+    description: Path to the plugin directory. Relative paths are resolved from the GitHub workspace.
+    required: false
+    default: "."
+  php-version:
+    description: PHP version (8.1, 8.2, 8.3, or 8.4).
+    required: false
+    default: "8.3"
+  wp-version:
+    description: WordPress version or "latest".
+    required: false
+    default: latest
+  wc-version:
+    description: WooCommerce version or "latest".
+    required: false
+    default: latest
+  hpos-mode:
+    description: HPOS mode (enabled or disabled).
+    required: false
+    default: enabled
+  skip-generic-tests:
+    description: Set to 1 to skip harness-owned generic tests.
+    required: false
+    default: "0"
+  skip-plugin-tests:
+    description: Set to 1 to skip discovered plugin tests.
+    required: false
+    default: "0"
+  plugin-test-command:
+    description: Optional override for plugin-specific tests.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve plugin path and run harness
+      shell: bash
+      env:
+        INPUT_PLUGIN_PATH: ${{ inputs.plugin-path }}
+        PLUGIN_SLUG: ${{ inputs.plugin-slug }}
+        PHP_VERSION: ${{ inputs.php-version }}
+        WP_VERSION: ${{ inputs.wp-version }}
+        WC_VERSION: ${{ inputs.wc-version }}
+        HPOS_MODE: ${{ inputs.hpos-mode }}
+        PC_SKIP_GENERIC_TESTS: ${{ inputs.skip-generic-tests }}
+        PC_SKIP_PLUGIN_TESTS: ${{ inputs.skip-plugin-tests }}
+        PLUGIN_TEST_COMMAND: ${{ inputs.plugin-test-command }}
+      run: |
+        set -euo pipefail
+        if [[ "${INPUT_PLUGIN_PATH}" = /* ]]; then
+          PLUGIN_PATH="${INPUT_PLUGIN_PATH}"
+        else
+          PLUGIN_PATH="${GITHUB_WORKSPACE}/${INPUT_PLUGIN_PATH}"
+        fi
+        export PLUGIN_PATH
+        cd "${GITHUB_ACTION_PATH}"
+        ./scripts/run-tests.sh
