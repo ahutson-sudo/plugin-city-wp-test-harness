@@ -23,6 +23,7 @@ use function PluginCity\Harness\finish;
 use function PluginCity\Harness\hpos_is_enabled;
 use function PluginCity\Harness\internal_http;
 use function PluginCity\Harness\logs_contain_fatal;
+use function PluginCity\Harness\extra_plugin_slug;
 use function PluginCity\Harness\mounted_plugin_slug;
 use function PluginCity\Harness\plugin_basename_from_slug;
 use function PluginCity\Harness\suite;
@@ -48,6 +49,16 @@ assert_true( function_exists( 'wc_create_order' ), 'WooCommerce order API is ava
 suite( 'Plugin is active' );
 assert_true( is_plugin_active( $basename ), $slug . ' is active' );
 assert_true( is_dir( WP_PLUGIN_DIR . '/' . $slug ) || file_exists( WP_PLUGIN_DIR . '/' . $basename ), 'Plugin files are mounted' );
+
+$extra_slug = extra_plugin_slug();
+if ( '' !== $extra_slug ) {
+	$extra_basename = plugin_basename_from_slug( $extra_slug );
+	assert_true( is_plugin_active( $extra_basename ), $extra_slug . ' extra plugin is active' );
+	assert_true(
+		is_dir( WP_PLUGIN_DIR . '/' . $extra_slug ) || file_exists( WP_PLUGIN_DIR . '/' . $extra_basename ),
+		'Extra plugin files are mounted'
+	);
+}
 
 suite( 'HPOS mode' );
 if ( 'disabled' === $hpos_mode ) {

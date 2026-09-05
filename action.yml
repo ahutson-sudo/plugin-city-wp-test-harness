@@ -41,6 +41,14 @@ inputs:
     description: Optional override for plugin-specific tests.
     required: false
     default: ""
+  extra-plugin-slug:
+    description: Directory name under wp-content/plugins for a second mounted plugin (for example a Pro add-on).
+    required: false
+    default: ""
+  extra-plugin-path:
+    description: Path to the extra plugin directory. Relative paths are resolved from the GitHub workspace.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -49,7 +57,9 @@ runs:
       shell: bash
       env:
         INPUT_PLUGIN_PATH: ${{ inputs.plugin-path }}
+        INPUT_EXTRA_PLUGIN_PATH: ${{ inputs.extra-plugin-path }}
         PLUGIN_SLUG: ${{ inputs.plugin-slug }}
+        EXTRA_PLUGIN_SLUG: ${{ inputs.extra-plugin-slug }}
         PHP_VERSION: ${{ inputs.php-version }}
         WP_VERSION: ${{ inputs.wp-version }}
         WC_VERSION: ${{ inputs.wc-version }}
@@ -65,5 +75,13 @@ runs:
           PLUGIN_PATH="${GITHUB_WORKSPACE}/${INPUT_PLUGIN_PATH}"
         fi
         export PLUGIN_PATH
+        if [[ -n "${INPUT_EXTRA_PLUGIN_PATH}" ]]; then
+          if [[ "${INPUT_EXTRA_PLUGIN_PATH}" = /* ]]; then
+            EXTRA_PLUGIN_PATH="${INPUT_EXTRA_PLUGIN_PATH}"
+          else
+            EXTRA_PLUGIN_PATH="${GITHUB_WORKSPACE}/${INPUT_EXTRA_PLUGIN_PATH}"
+          fi
+          export EXTRA_PLUGIN_PATH
+        fi
         cd "${GITHUB_ACTION_PATH}"
         ./scripts/run-tests.sh

@@ -37,3 +37,10 @@ function mounted_plugin_slug(): string {
 
 	return $slug;
 }
+
+/**
+ * Extra mounted plugin slug, or an empty string when none is mounted.
+ */
+function extra_plugin_slug(): string {
+	return trim( (string) getenv( 'EXTRA_PLUGIN_SLUG' ) );
+}

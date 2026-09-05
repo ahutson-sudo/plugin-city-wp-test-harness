@@ -11,13 +11,26 @@ pc_harness_root() {
 
 HARNESS_ROOT="${HARNESS_ROOT:-$(pc_harness_root)}"
 
+pc_compose_files() {
+  local files=( -f "${HARNESS_ROOT}/docker-compose.yml" )
+  if [[ -n "${EXTRA_PLUGIN_PATH:-}" ]]; then
+    files+=( -f "${HARNESS_ROOT}/docker-compose.extra.yml" )
+  fi
+  printf '%s\n' "${files[@]}"
+}
+
 pc_compose() {
+  local files=()
+  while IFS= read -r part; do
+    files+=( "${part}" )
+  done < <(pc_compose_files)
+
   if docker compose version >/dev/null 2>&1; then
-    docker compose -f "${HARNESS_ROOT}/docker-compose.yml" "$@"
+    docker compose "${files[@]}" "$@"
     return
   fi
   if command -v docker-compose >/dev/null 2>&1; then
-    docker-compose -f "${HARNESS_ROOT}/docker-compose.yml" "$@"
+    docker-compose "${files[@]}" "$@"
     return
   fi
   echo "Docker Compose is required. Install Docker Desktop and ensure 'docker compose' works." >&2
@@ -50,6 +63,8 @@ pc_load_env() {
   WP_PORT="${WP_PORT:-8080}"
   PLUGIN_PATH="${PLUGIN_PATH:-}"
   PLUGIN_SLUG="${PLUGIN_SLUG:-}"
+  EXTRA_PLUGIN_PATH="${EXTRA_PLUGIN_PATH:-}"
+  EXTRA_PLUGIN_SLUG="${EXTRA_PLUGIN_SLUG:-}"
   GENERIC_TEST_WC_INACTIVE="${GENERIC_TEST_WC_INACTIVE:-1}"
   PC_SKIP_GENERIC_TESTS="${PC_SKIP_GENERIC_TESTS:-0}"
   PC_SKIP_PLUGIN_TESTS="${PC_SKIP_PLUGIN_TESTS:-0}"
@@ -64,6 +79,23 @@ pc_load_env() {
 
   if [[ -z "${PLUGIN_SLUG}" && -n "${PLUGIN_PATH}" ]]; then
     PLUGIN_SLUG="$(basename "${PLUGIN_PATH}")"
+  fi
+
+  if [[ -n "${EXTRA_PLUGIN_PATH}" ]]; then
+    if [[ ! -d "${EXTRA_PLUGIN_PATH}" ]]; then
+      echo "EXTRA_PLUGIN_PATH is not a directory: ${EXTRA_PLUGIN_PATH}" >&2
+      exit 1
+    fi
+    EXTRA_PLUGIN_PATH="$(cd "${EXTRA_PLUGIN_PATH}" && pwd)"
+    if [[ -z "${EXTRA_PLUGIN_SLUG}" ]]; then
+      EXTRA_PLUGIN_SLUG="$(basename "${EXTRA_PLUGIN_PATH}")"
+    fi
+    if [[ "${EXTRA_PLUGIN_SLUG}" == "${PLUGIN_SLUG}" ]]; then
+      echo "EXTRA_PLUGIN_SLUG must be different from PLUGIN_SLUG." >&2
+      exit 1
+    fi
+  else
+    EXTRA_PLUGIN_SLUG=""
   fi
 
   case "${HPOS_MODE}" in
@@ -83,7 +115,7 @@ pc_load_env() {
   COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-pc-${PLUGIN_SLUG:-harness}}"
 
   export PHP_VERSION WP_VERSION WC_VERSION HPOS_MODE WP_PORT
-  export PLUGIN_PATH PLUGIN_SLUG PLUGIN_TEST_COMMAND
+  export PLUGIN_PATH PLUGIN_SLUG EXTRA_PLUGIN_PATH EXTRA_PLUGIN_SLUG PLUGIN_TEST_COMMAND
   export GENERIC_TEST_WC_INACTIVE PC_SKIP_GENERIC_TESTS PC_SKIP_PLUGIN_TESTS
   export WP_IMAGE_TAG WPCLI_IMAGE_TAG COMPOSE_PROJECT_NAME
   export HARNESS_ROOT
@@ -101,6 +133,10 @@ pc_require_plugin() {
   fi
   if [[ ! -d "${PLUGIN_PATH}" ]]; then
     echo "PLUGIN_PATH does not exist: ${PLUGIN_PATH}" >&2
+    exit 1
+  fi
+  if [[ -n "${EXTRA_PLUGIN_PATH}" && ! -d "${EXTRA_PLUGIN_PATH}" ]]; then
+    echo "EXTRA_PLUGIN_PATH does not exist: ${EXTRA_PLUGIN_PATH}" >&2
     exit 1
   fi
 }
@@ -121,6 +157,34 @@ pc_php_in_plugin() {
     "$@"
 }
 
+pc_run_plugin_command() {
+  local slug="$1"
+  local command="$2"
+
+  pc_require_plugin
+  pc_require_docker
+
+  if [[ "${command}" == wp\ * ]]; then
+    # shellcheck disable=SC2086
+    pc_compose run --rm --workdir "/var/www/html/wp-content/plugins/${slug}" wpcli ${command#wp }
+    return
+  fi
+  if [[ "${command}" == php\ * ]]; then
+    # shellcheck disable=SC2086
+    pc_compose run --rm \
+      --workdir "/var/www/html/wp-content/plugins/${slug}" \
+      --entrypoint php \
+      wpcli \
+      ${command#php }
+    return
+  fi
+  pc_compose run --rm \
+    --workdir "/var/www/html/wp-content/plugins/${slug}" \
+    --entrypoint sh \
+    wpcli \
+    -lc "${command}"
+}
+
 pc_wait_for_wp() {
   local attempt
   echo "Waiting for WordPress..."
@@ -138,6 +202,10 @@ pc_print_config() {
   echo "Harness:     ${HARNESS_ROOT}"
   echo "Plugin path: ${PLUGIN_PATH}"
   echo "Plugin slug: ${PLUGIN_SLUG}"
+  if [[ -n "${EXTRA_PLUGIN_PATH}" ]]; then
+    echo "Extra path:  ${EXTRA_PLUGIN_PATH}"
+    echo "Extra slug:  ${EXTRA_PLUGIN_SLUG}"
+  fi
   echo "PHP:         ${PHP_VERSION}"
   echo "WordPress:   ${WP_VERSION} (image tag ${WP_IMAGE_TAG})"
   echo "WooCommerce: ${WC_VERSION}"

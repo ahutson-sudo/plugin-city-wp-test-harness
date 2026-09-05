@@ -51,6 +51,7 @@ services:
       WORDPRESS_DB_PASSWORD: wordpress
       WORDPRESS_DB_NAME: wordpress
       PLUGIN_SLUG: ${PLUGIN_SLUG:-}
+      EXTRA_PLUGIN_SLUG: ${EXTRA_PLUGIN_SLUG:-}
       HPOS_MODE: ${HPOS_MODE:-enabled}
       PC_HARNESS_ROOT: /opt/pc-harness
     volumes:

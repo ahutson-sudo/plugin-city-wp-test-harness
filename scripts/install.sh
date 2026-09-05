@@ -57,5 +57,15 @@ if ! pc_wp plugin is-installed "${PLUGIN_SLUG}" >/dev/null 2>&1; then
 fi
 
 pc_wp plugin activate "${PLUGIN_SLUG}"
+
+if [[ -n "${EXTRA_PLUGIN_SLUG}" ]]; then
+  if ! pc_wp plugin is-installed "${EXTRA_PLUGIN_SLUG}" >/dev/null 2>&1; then
+    echo "Mounted extra plugin '${EXTRA_PLUGIN_SLUG}' was not found in wp-content/plugins." >&2
+    echo "Check EXTRA_PLUGIN_PATH and EXTRA_PLUGIN_SLUG." >&2
+    exit 1
+  fi
+  pc_wp plugin activate "${EXTRA_PLUGIN_SLUG}"
+fi
+
 echo "Install complete."
 pc_wp plugin list --status=active

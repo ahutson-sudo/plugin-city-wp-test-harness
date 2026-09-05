@@ -30,3 +30,18 @@ jobs:
         with:
           plugin-slug: your-plugin-slug
           hpos-mode: disabled
+
+  # Core + Pro add-on. Check out the add-on into extra-plugin-path first.
+  # with-pro:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         repository: OWNER/your-plugin-pro
+  #         path: your-plugin-pro
+  #     - uses: OWNER/plugin-city-wp-test-harness@v1
+  #       with:
+  #         plugin-slug: your-plugin-slug
+  #         extra-plugin-slug: your-plugin-pro
+  #         extra-plugin-path: your-plugin-pro

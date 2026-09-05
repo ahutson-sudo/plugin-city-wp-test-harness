@@ -28,6 +28,16 @@ on:
         required: false
         type: string
         default: enabled
+      extra-plugin-slug:
+        description: Directory name for an optional second mounted plugin.
+        required: false
+        type: string
+        default: ""
+      extra-plugin-path:
+        description: Path to the extra plugin, relative to the caller repository root or absolute.
+        required: false
+        type: string
+        default: ""
 
 jobs:
   test:
@@ -63,6 +73,8 @@ jobs:
         with:
           plugin-slug: ${{ inputs.plugin-slug }}
           plugin-path: ${{ github.workspace }}/plugin/${{ inputs.plugin-path }}
+          extra-plugin-slug: ${{ inputs.extra-plugin-slug }}
+          extra-plugin-path: ${{ inputs.extra-plugin-path }}
           php-version: ${{ inputs.php-version }}
           wp-version: ${{ inputs.wp-version }}
           wc-version: ${{ inputs.wc-version }}

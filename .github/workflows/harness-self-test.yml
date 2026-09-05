@@ -29,3 +29,19 @@ jobs:
           wp-version: latest
           wc-version: latest
           hpos-mode: enabled
+
+  extra-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run harness with a second mounted plugin
+        uses: ./
+        with:
+          plugin-slug: sample-plugin
+          plugin-path: fixtures/sample-plugin
+          extra-plugin-slug: sample-addon
+          extra-plugin-path: fixtures/sample-addon
+          php-version: "8.3"
+          wp-version: latest
+          wc-version: latest
+          hpos-mode: enabled

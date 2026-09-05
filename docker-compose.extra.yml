@@ -1,0 +1,10 @@
+# Included only when EXTRA_PLUGIN_PATH is set.
+# Mount a second plugin beside the primary plugin (Core + Pro add-on).
+
+services:
+  wordpress:
+    volumes:
+      - ${EXTRA_PLUGIN_PATH:?EXTRA_PLUGIN_PATH is required}:/var/www/html/wp-content/plugins/${EXTRA_PLUGIN_SLUG:?EXTRA_PLUGIN_SLUG is required}
+  wpcli:
+    volumes:
+      - ${EXTRA_PLUGIN_PATH:?EXTRA_PLUGIN_PATH is required}:/var/www/html/wp-content/plugins/${EXTRA_PLUGIN_SLUG:?EXTRA_PLUGIN_SLUG is required}

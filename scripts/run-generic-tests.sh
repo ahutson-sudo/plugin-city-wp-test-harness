@@ -26,6 +26,9 @@ echo "=== Plugin deactivate / activate ==="
 pc_wp plugin deactivate "${PLUGIN_SLUG}"
 run_eval /opt/pc-harness/tests/generic/test-after-deactivate.php
 pc_wp plugin activate "${PLUGIN_SLUG}"
+if [[ -n "${EXTRA_PLUGIN_SLUG}" ]]; then
+  pc_wp plugin activate "${EXTRA_PLUGIN_SLUG}" >/dev/null || true
+fi
 
 if [[ "${GENERIC_TEST_WC_INACTIVE}" == "1" ]]; then
   echo
@@ -34,6 +37,9 @@ if [[ "${GENERIC_TEST_WC_INACTIVE}" == "1" ]]; then
   run_eval /opt/pc-harness/tests/generic/test-woocommerce-inactive.php
   pc_wp plugin activate woocommerce
   pc_wp plugin activate "${PLUGIN_SLUG}"
+  if [[ -n "${EXTRA_PLUGIN_SLUG}" ]]; then
+    pc_wp plugin activate "${EXTRA_PLUGIN_SLUG}" >/dev/null || true
+  fi
 fi
 
 exit "${failed}"

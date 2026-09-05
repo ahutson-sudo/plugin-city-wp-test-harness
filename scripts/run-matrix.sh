@@ -23,6 +23,8 @@ while IFS=$'\t' read -r php_version wp_version wc_version hpos_mode; do
   HPOS_MODE="${hpos_mode}" \
   PLUGIN_PATH="${PLUGIN_PATH}" \
   PLUGIN_SLUG="${PLUGIN_SLUG}" \
+  EXTRA_PLUGIN_PATH="${EXTRA_PLUGIN_PATH:-}" \
+  EXTRA_PLUGIN_SLUG="${EXTRA_PLUGIN_SLUG:-}" \
   "${HARNESS_ROOT}/scripts/reset.sh"
 
   set +e
@@ -32,6 +34,8 @@ while IFS=$'\t' read -r php_version wp_version wc_version hpos_mode; do
   HPOS_MODE="${hpos_mode}" \
   PLUGIN_PATH="${PLUGIN_PATH}" \
   PLUGIN_SLUG="${PLUGIN_SLUG}" \
+  EXTRA_PLUGIN_PATH="${EXTRA_PLUGIN_PATH:-}" \
+  EXTRA_PLUGIN_SLUG="${EXTRA_PLUGIN_SLUG:-}" \
   "${HARNESS_ROOT}/scripts/run-tests.sh"
   status=$?
   set -e

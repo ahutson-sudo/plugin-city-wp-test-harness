@@ -33,7 +33,11 @@ jobs:
           wp-version: latest
           wc-version: latest
           hpos-mode: enabled
+          extra-plugin-slug: due-date-for-woocommerce-pro
+          extra-plugin-path: due-date-for-woocommerce-pro
 ```
+
+For Core + Pro, check out both repositories and pass the add-on as `extra-plugin-*`. Activate Core as `plugin-slug` and the add-on as `extra-plugin-slug`.
 
 Replace `OWNER` with the GitHub user or org that owns the harness repo.
 
@@ -100,12 +104,16 @@ Required inputs:
 |---|---|---|
 | `PLUGIN_PATH` | Absolute or relative path to the plugin directory | `../due-date-for-woocommerce` |
 | `PLUGIN_SLUG` | Directory name under `wp-content/plugins` | `due-date-for-woocommerce` |
+| `EXTRA_PLUGIN_PATH` | Optional second plugin directory (Pro add-on) | `../due-date-for-woocommerce-pro` |
+| `EXTRA_PLUGIN_SLUG` | Directory name for the extra plugin | `due-date-for-woocommerce-pro` |
 | `WP_VERSION` | `latest` or a WordPress version tag | `latest` or `6.7` |
 | `WC_VERSION` | `latest` or a WooCommerce version | `latest` or `10.0.0` |
 | `PHP_VERSION` | `8.1` `8.2` `8.3` `8.4` | `8.3` |
 | `HPOS_MODE` | `enabled` or `disabled` | `enabled` |
 
 `PLUGIN_PATH` must be the folder that contains the main plugin file. If `PLUGIN_SLUG` is omitted, the harness uses the directory name.
+
+Mount a Pro add-on beside Core with `EXTRA_PLUGIN_PATH` / `EXTRA_PLUGIN_SLUG`. The harness activates Core first, then the add-on. Leave both unset for a single plugin.
 
 Copy `.env.example` to `.env`, or export the variables in the shell.
 
@@ -187,6 +195,7 @@ Owned by the harness. They do not mention Due Date or any other product:
 - WordPress boots
 - WooCommerce is active
 - the mounted plugin is active
+- an extra mounted plugin is active when `EXTRA_PLUGIN_SLUG` is set
 - the plugin deactivates and WordPress still boots
 - no PHP fatal on bootstrap / storefront
 - WooCommerce inactive request (plugin must not fatal)
