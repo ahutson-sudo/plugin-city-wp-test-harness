@@ -10,6 +10,7 @@
 require_once dirname( __DIR__ ) . '/helpers/load.php';
 
 use function PluginCity\Harness\add_order_shipping;
+use function PluginCity\Harness\admin_http;
 use function PluginCity\Harness\assert_same;
 use function PluginCity\Harness\assert_true;
 use function PluginCity\Harness\clear_error_logs;
@@ -22,6 +23,7 @@ use function PluginCity\Harness\error_log_contents;
 use function PluginCity\Harness\finish;
 use function PluginCity\Harness\hpos_is_enabled;
 use function PluginCity\Harness\internal_http;
+use function PluginCity\Harness\is_admin_screen;
 use function PluginCity\Harness\logs_contain_fatal;
 use function PluginCity\Harness\extra_plugin_slug;
 use function PluginCity\Harness\mounted_plugin_slug;
@@ -76,6 +78,16 @@ assert_same( 200, $login['code'], 'wp-login.php returns HTTP 200' );
 $admin = internal_http( '/wp-admin/' );
 assert_true( ! $admin['error'], 'wp-admin request succeeded' );
 assert_true( in_array( $admin['code'], array( 200, 301, 302 ), true ), 'wp-admin responds (200 or redirect)' );
+
+// Anonymously, the line above only ever gets the login redirect, so no admin
+// screen is built and admin_notices never fires. Sign in so the admin-only
+// hooks actually run.
+$dashboard = admin_http( '/wp-admin/' );
+assert_true( ! $dashboard['error'], 'Signed-in dashboard request succeeded' . ( $dashboard['message'] ? ' (' . $dashboard['message'] . ')' : '' ) );
+assert_true( is_admin_screen( $dashboard ), 'Dashboard renders for a signed-in admin (HTTP ' . $dashboard['code'] . ')' );
+
+$plugins_screen = admin_http( '/wp-admin/plugins.php' );
+assert_true( is_admin_screen( $plugins_screen ), 'Plugins screen renders for a signed-in admin (HTTP ' . $plugins_screen['code'] . ')' );
 
 $home = internal_http( '/' );
 assert_true( ! $home['error'], 'Storefront request succeeded' . ( $home['message'] ? ' (' . $home['message'] . ')' : '' ) );
