@@ -82,12 +82,23 @@ assert_true( in_array( $admin['code'], array( 200, 301, 302 ), true ), 'wp-admin
 // Anonymously, the line above only ever gets the login redirect, so no admin
 // screen is built and admin_notices never fires. Sign in so the admin-only
 // hooks actually run.
+//
+// A freshly installed WooCommerce sends the first admin page view to its setup
+// wizard, which is why the dashboard is allowed to redirect here. Clearing the
+// transient removes the usual cause, but the exact behaviour moves between
+// WooCommerce versions and the matrix spans several, so the strict "a real
+// admin screen rendered" assertion goes on a screen WooCommerce leaves alone.
+delete_transient( '_wc_activation_redirect' );
+
 $dashboard = admin_http( '/wp-admin/' );
 assert_true( ! $dashboard['error'], 'Signed-in dashboard request succeeded' . ( $dashboard['message'] ? ' (' . $dashboard['message'] . ')' : '' ) );
-assert_true( is_admin_screen( $dashboard ), 'Dashboard renders for a signed-in admin (HTTP ' . $dashboard['code'] . ')' );
+assert_true( in_array( $dashboard['code'], array( 200, 301, 302 ), true ), 'Dashboard responds for a signed-in admin (HTTP ' . $dashboard['code'] . ')' );
 
 $plugins_screen = admin_http( '/wp-admin/plugins.php' );
 assert_true( is_admin_screen( $plugins_screen ), 'Plugins screen renders for a signed-in admin (HTTP ' . $plugins_screen['code'] . ')' );
+
+$settings_screen = admin_http( '/wp-admin/options-general.php' );
+assert_true( is_admin_screen( $settings_screen ), 'Settings screen renders for a signed-in admin (HTTP ' . $settings_screen['code'] . ')' );
 
 $home = internal_http( '/' );
 assert_true( ! $home['error'], 'Storefront request succeeded' . ( $home['message'] ? ' (' . $home['message'] . ')' : '' ) );
