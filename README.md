@@ -198,10 +198,18 @@ Owned by the harness. They do not mention Due Date or any other product:
 - an extra mounted plugin is active when `EXTRA_PLUGIN_SLUG` is set
 - the plugin deactivates and WordPress still boots
 - no PHP fatal on bootstrap / storefront
-- WooCommerce inactive request (plugin must not fatal)
+- WooCommerce inactive: storefront and wp-admin must not fatal, and the plugin stays active
 - HPOS matches `HPOS_MODE`
 - `wp-login.php` and `wp-admin` respond
+- real admin screens render for a signed-in administrator, with and without WooCommerce
 - a customer, simple product, variable product, shipping zone, and order can be created
+
+Admin screens are requested as a signed-in administrator on purpose. An
+anonymous `/wp-admin/` request only returns the login redirect, so no admin
+screen is built and `admin_notices`, `admin_init` and `admin_post_*` never run.
+A plugin that reaches for a WooCommerce-only class on one of those hooks looks
+perfectly healthy until someone actually loads a page, which is the gap these
+checks close.
 
 Skip groups with `PC_SKIP_GENERIC_TESTS=1` or `GENERIC_TEST_WC_INACTIVE=0`.
 
