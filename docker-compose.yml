@@ -10,9 +10,23 @@ services:
       - db_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      # A first boot builds the data directory before mariadbd listens at all,
+      # and until it does every probe fails in about 70ms. Failures outside a
+      # start period count towards retries, so the budget used to be retries
+      # times interval — 30 x 5s = 150s — and a runner with a busy disk hit it
+      # at 151s, reported the container permanently unhealthy, and failed the
+      # job before a test ran. Failures inside start_period neither count nor
+      # mark the container unhealthy, so a boot now has 180s of grace and 60s
+      # of counted retries after it. Health is reported the moment a probe
+      # passes, so an ordinary boot is no slower for the longer grace.
+      start_period: 180s
       interval: 5s
-      timeout: 5s
-      retries: 30
+      # The probe connects and asks InnoDB whether it has finished starting:
+      # 70ms on an idle machine, but a probe killed for running over counts
+      # exactly like a refused connection, and the runs this has to survive are
+      # the ones where the disk is the bottleneck.
+      timeout: 10s
+      retries: 12
     restart: unless-stopped
 
   wordpress:

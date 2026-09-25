@@ -135,6 +135,24 @@ PLUGIN_SLUG=due-date-for-woocommerce \
 - `stop.sh` stops containers and **keeps** the database volume
 - `reset.sh` removes containers **and** volumes
 
+### Waiting for MariaDB
+
+`start.sh` brings the database up on its own, waits for its health check, and
+prints how long it took. A boot that has nothing to compete with takes about
+fifteen seconds; the health check allows 180 seconds of grace before a failed
+probe counts against it and 60 seconds of counted retries after that, because a
+loaded CI runner has hit a 150-second limit and reported a database that was
+still starting as permanently broken.
+
+If it never becomes healthy the harness prints the container state, its restart
+count, the last five health probes with their output and duration, and the
+MariaDB log, rather than leaving Compose's "container is unhealthy" as the whole
+story. Restarts above zero mean a crash rather than a slow boot; probes that ran
+for the full timeout mean the server was reachable but too busy to answer.
+
+Override the wait with `PC_DB_WAIT_SECONDS`. Keep it in step with
+`start_period` plus `retries × interval` in `docker-compose.yml`.
+
 WordPress is published at `http://localhost:8080` (override with `WP_PORT`). Admin user: `admin` / `admin`.
 
 ## Change versions

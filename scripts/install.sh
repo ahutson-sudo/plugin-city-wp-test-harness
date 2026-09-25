@@ -8,7 +8,7 @@ pc_require_docker
 pc_print_config
 
 if ! pc_compose ps -q wordpress 2>/dev/null | grep -q .; then
-  pc_compose up -d wordpress db
+  pc_bring_up
 fi
 pc_wait_for_wp
 
