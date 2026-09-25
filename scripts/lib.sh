@@ -53,7 +53,7 @@ pc_require_docker() {
 # that was still booting from one that was broken. Establishing that nothing had
 # run took reading the whole job log, so the harness now says what it saw.
 pc_explain_startup_failure() {
-  local waited="${1:-0}" id
+  local waited="${1:-0}" id probes
   id="$(pc_compose ps -aq db 2>/dev/null | head -n1)"
 
   echo
@@ -70,8 +70,13 @@ pc_explain_startup_failure() {
     docker inspect --format 'state={{ .State.Status }} exit={{ .State.ExitCode }} restarts={{ .RestartCount }} health={{ if .State.Health }}{{ .State.Health.Status }} failed_in_a_row={{ .State.Health.FailingStreak }}{{ else }}(none){{ end }}' "${id}" || true
     echo
     echo "--- Health probes (Docker keeps the last five) ---"
-    docker inspect --format '{{ range .State.Health.Log }}{{ .Start }} exit={{ .ExitCode }} took={{ .End.Sub .Start }} {{ printf "%q" .Output }}
-{{ end }}' "${id}" || true
+    probes="$(docker inspect --format '{{ range .State.Health.Log }}{{ .Start }} exit={{ .ExitCode }} took={{ .End.Sub .Start }} {{ printf "%q" .Output }}
+{{ end }}' "${id}" 2>/dev/null || true)"
+    if [[ -n "${probes//[[:space:]]/}" ]]; then
+      echo "${probes}"
+    else
+      echo "(no probe has finished yet)"
+    fi
   fi
 
   echo
@@ -120,7 +125,7 @@ pc_wait_for_db() {
     waited=$(( waited + 2 ))
     if (( waited % 30 == 0 )); then
       streak="$(docker inspect --format '{{ .State.Health.FailingStreak }}' "${id}" 2>/dev/null || true)"
-      echo "  still ${status} after ${waited}s (failed probes in a row: ${streak:-unknown})"
+      echo "  still ${status} after ${waited}s (counted probe failures: ${streak:-unknown}; failures inside the start period do not count)"
     fi
   done
 
