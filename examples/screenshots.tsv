@@ -19,8 +19,19 @@
 # because the caption and the screen it describes are one editorial decision, and
 # filing them apart is how a set comes to illustrate the wrong sentence.
 #
+# screenshot-1 says who is looking, and the storefront shots are the ones that
+# have to. Without a prefix a shot is taken as the administrator, which is right
+# for wp-admin and wrong for a page meant to show a customer's screen -- an
+# administrator is let through WooCommerce's Coming soon page and a shopper is
+# not, so a set taken entirely as the administrator can photograph a shop no
+# customer can reach.
+#
+# An 'allow' line would go here too, naming one shot and one request that is known
+# to fail and known to change nothing on the screen. None is needed for these
+# four, which is the usual answer.
+#
 # name	path	frame	click	pad	margin	width	height	caption
-screenshot-1	/product/the-salt-path-home/	header.wp-block-template-part, .wp-block-columns.alignwide	-	0	0	1280	1200	A product page selling ahead of release, with the date above the Pre-order button.
+screenshot-1	visitor:/product/the-salt-path-home/	header.wp-block-template-part, .wp-block-columns.alignwide	-	0	0	1280	1200	A product page selling ahead of release, with the date above the Pre-order button.
 screenshot-2	/wp-admin/post.php?post={{product.the-salt-path-home}}&action=edit	#woocommerce-product-data	.apofw_preorder_tab a	0	18	1160	1400	The Pre-order tab on the product, where the date is set.
 screenshot-3	/wp-admin/admin.php?page=apofw-settings	.apofw-settings__header, .apofw-settings-layout, .apofw-settings__footer	-	24	0	1400	1400	The settings screen, on the card that sets the button wording.
 screenshot-4	/wp-admin/admin.php?page=wc-orders&action=edit&id={{order.awaiting-release}}	#woocommerce-order-data, #woocommerce-order-items, #postbox-container-1	-	0	18	1220	1800	An order awaiting release, showing what was pre-ordered and when it is due.

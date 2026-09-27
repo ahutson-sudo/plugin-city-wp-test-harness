@@ -414,7 +414,7 @@ One line per shot, tab separated. Blank lines and `#` comments are ignored.
 | Column | Meaning |
 |---|---|
 | `name` | Output file stem, so `screenshot-1` writes `screenshot-1.png` |
-| `path` | Site-relative, e.g. `/product/a-book/` or `/wp-admin/admin.php?page=my-settings`. May carry `{{kind.key}}` placeholders |
+| `path` | Site-relative, e.g. `/product/a-book/` or `/wp-admin/admin.php?page=my-settings`. May carry `{{kind.key}}` placeholders, and may be prefixed with who is looking |
 | `frame` | CSS selector list. The **union** of every match is what gets cropped to |
 | `click` | Selector clicked before the frame is measured, or `-` |
 | `pad` | Page pixels kept around the subject |
@@ -435,6 +435,123 @@ A selector that matches nothing fails the run. Nothing warns you that a frame ha
 quietly got *bigger*, which is the maintenance surface to watch: compare a new
 capture against the committed one before believing it.
 
+With `pad` at `0` the crop is flush to the subject less the two pixels the rule
+itself occupies, so a subject whose own border is part of the picture wants
+`pad 2` or more. It is worth setting anyway: a screen photographed hard against
+its outermost element reads as a cut-out rather than as a screen.
+
+### Who a shot is taken as
+
+A bare path is photographed as the administrator, which is right for wp-admin and
+wrong for everything else. A storefront shot is a *shopper's* screen, and a shopper
+is usually not an administrator: photograph the cart as one and the picture
+carries an administrator's view of the shop into a page meant to show a
+customer's. WooCommerce's Coming soon page is the sharp end of that — an
+administrator is let through it and a shopper is not, so a set taken entirely as
+the administrator can photograph a shop no customer can reach, at the expected
+size, with nothing logged.
+
+So a path may say who is looking, before the slash:
+
+```
+screenshot-3	visitor:/cart/	.wp-block-woocommerce-cart	…
+screenshot-4	jo:/my-account/orders/	.woocommerce-MyAccount-content	…
+```
+
+`visitor` is the reserved word for nobody: the page is rendered with no session
+at all. Anything else is a WordPress login, and a login the site has never heard
+of **stops the run** rather than being quietly photographed signed out — which
+otherwise looks like a shop with an empty basket.
+
+A path always begins with a slash, so a prefix can never be mistaken for part of
+a URL.
+
+Each shot gets a fresh browser profile, so a signed-out shot stays signed out
+however many signed-in shots came before it. A shot taken as somebody other than
+the administrator is rendered twice in the warm-up pass described below, once as
+the administrator so that the site has finished writing whatever a first
+privileged view writes, and once as the person who will be photographed.
+
+### Nothing is saved unless the page says it drew itself
+
+A screen that loads its own content — over admin-ajax, the REST API, WooCommerce's
+Store API — is the one that photographs wrongly without looking wrong. It has two
+faces and only one of them is obvious. A panel whose request is refused renders as
+an empty gap, which anybody would notice. A basket whose request is refused draws
+an error banner *after* the frame has been measured, so the rule stays where it was
+put, the subject slides down behind it, and the crop comes out the banner's height
+too high — at a plausible size, in the right place, looking exactly like a
+screenshot.
+
+There is one render and no channel back out of it, so the page's verdict on itself
+travels as the **colour of the rule** it drew. `crop-to-frame.py` holds the same
+table and is the only thing that reads it:
+
+| Rule | Meaning |
+|---|---|
+| magenta | The page finished drawing itself. Crop it |
+| green | A request the page made for its own content came back an error |
+| cyan | A request had not answered when the picture was taken |
+| yellow | The subject was still moving when the picture was taken |
+| red | An `allow` line in the shot list describes a request this page never makes |
+
+Four of the five **stop the run**, name the reason, and save nothing. The render
+that was refused is kept beside the set as `<name>.rejected.png`, at twice final
+size, with the reason written across the top of it — and last run's picture is
+deleted before this run's is attempted, because a refusal that left the old file in
+place would leave a set looking complete and current when one of its screens had
+not been photographed at all.
+
+What the page asserts is deliberately positive. Not "no error text on the screen",
+which only ever catches the failures somebody had already thought of, but: every
+same-origin request this page made in order to draw itself finished and answered,
+the subject measures the same twice running, and the rule round it closes on all
+four sides. Requests to other origins are left out, because a page reaching a
+third party is not the page drawing itself, and in a container with no route to one
+every such request fails whether or not anything is wrong.
+
+The driver adds the half of that a browser cannot do. The warm-up pass fetches
+each page with `curl`, which is the one moment in a capture when something can
+read a response header, and the shim says in a header who it signed in and which
+cookie carries the session. A run stops there if the site signed in somebody else,
+signed in nobody, or signed its own render in without sending the browser a
+cookie — the last being the fault this whole section was built around, since a page
+authenticated for itself and anonymous for everything it loads is exactly how the
+empty gap and the too-tall crop were produced.
+
+A request that never answers at all is not a verdict, because Chrome's virtual
+clock stops while a fetch is outstanding: the render waits for it. Wait long enough
+and the driver kills the browser with no file written, and the run says `FAILED to
+render` and stops. So a slow screen is photographed correctly and a hung one is
+refused; the cyan verdict is the backstop for the day Chrome's clock behaves
+differently.
+
+#### Excusing one request, on one shot
+
+A screen may ask for something that is never going to arrive and draw itself
+perfectly anyway. WooCommerce 11.1 does it on the cart: a block theme's header
+carries a Mini Cart, that block is deliberately not rendered on the cart page, and
+the script module it registers is loaded regardless — so the module asks for a REST
+route it was never told the address of, gets a 404, and retries for as long as the
+page is open. Nothing on the screen depends on it.
+
+A shot list can say so, in a line of its own:
+
+```
+allow	cart	undefinedwc/store/v1/cart	The Mini Cart is not rendered on the cart page, so the script module it registers never learns where the REST API is. Nothing on the page depends on the answer.
+```
+
+Four fields, all required: the word `allow`, the name of **one** shot, a piece of
+the URL, and why it does not matter. The reason is required because the next person
+to read the file is the one who has to decide whether it is still true.
+
+This is the only way past the check and it is meant to be awkward. It names one
+request on one screen rather than a kind of error anywhere, and it has to keep
+being needed: a fragment nothing on that page asks for any more turns the rule red
+and refuses the shot, because an exception that has stopped applying is a hole in
+the check that nobody knows is open. An `allow` line naming a shot that is not in
+the list stops the run before anything is rendered.
+
 ### What makes a capture reproducible
 
 Three things the driver does that only make sense once you have seen a set fail to
@@ -453,6 +570,16 @@ reproduce, because none of them announces itself and none of them fails:
   will paint before an asynchronous decode finishes, and a gallery that fades on a
   CSS transition is not touching the document while it fades, so no amount of
   waiting for quiet catches it.
+- **An animation that never ends is stopped before the picture is taken.** A
+  progress bar with barber-pole stripes is somewhere different in its cycle every
+  render, so two runs of one shot list came back as the same set except for a
+  single band of a single picture. Nothing failed and both pictures looked right.
+  Only the endless ones are stopped, and not in CSS beside the transitions: an
+  entrance animation runs once, often from invisible, and turning that one off
+  photographs nothing at all. So the elements are asked what their iteration count
+  is, and the infinite ones are dropped back on the style they were animating from
+  — which, for decoration, is the picture anyway. An animation declared on a
+  `::before` or `::after` cannot be reached this way and is the one case left.
 
 The one thing none of that can fix is a *different shop*, which is the next
 section.
@@ -540,19 +667,45 @@ it too, so a mistyped placeholder cannot slip through as literal text and answer
   set was drawn with substitutes another one silently, and the letterforms change
   with nothing to say so.
 
-### The shim mints a login cookie, and must stay in the container
+### The shim signs a browser in, and must stay in the container
 
 `scripts/screenshot.sh` writes a must-use plugin into the WordPress volume with a
-token generated for that run, and on a request carrying that token it **generates
-a valid authentication cookie** for the admin user. That is the only way to photograph
-wp-admin without driving a login form, and it is indefensible anywhere a real
-site could reach it.
+token generated for that run. On a request carrying that token, it **signs a real
+browser in as any user named on the URL** — it calls `wp_set_auth_cookie()`, so a
+session token is written into that user's session list and the two cookies
+WordPress sends after a successful log-in go back in the response. It is a
+password-less log-in as anybody, for anybody who knows one string.
 
-It is therefore installed into the disposable volume, deleted when the driver
-exits, and goes with the volume in any case. Do not copy
-`tests/helpers/screenshot-mode.php` into a plugin, and do not adapt it into
-anything that ships. The harness is the right home for it precisely because the
-harness is thrown away.
+Read that twice before doing anything with this file. It is not a filter that
+makes the current request look privileged; the browser leaves with credentials
+and keeps them. The token is the whole of the protection, it travels in a query
+string, and there is no rate limit, no capability check, no audit and no way to
+revoke what has been handed out. On a site anyone else can reach it is a total
+compromise of every account on it, and the log would show a successful log-in.
+
+That is why it lives where it does, and the arrangement is not decoration:
+
+- It is written **into the disposable WordPress volume**, never into the plugin
+  under test and never into this repository's own plugin folders.
+- The token is generated per run from `/dev/urandom` and never written down.
+- The driver deletes the file on exit, and the volume is thrown away in any case.
+- The harness binds to `localhost`.
+
+Do not copy `tests/helpers/screenshot-mode.php` into a plugin. Do not adapt it, or
+any part of it, into anything that ships — not the sign-in, not the token check,
+not the header it answers with. Do not run the capture against a site that holds
+real data or is reachable from anywhere but the machine running it. The harness is
+the right home for this precisely because the harness is thrown away, and nothing
+about the file is safe once it is somewhere that is not.
+
+The shim signs the *browser* in and not merely the render, and that is the point of
+it rather than an excess. Putting a generated cookie into `$_COOKIE` authenticates
+only the request in flight, which is enough for `auth_redirect()` and leaves the
+browser anonymous — so the page renders signed in and everything it then loads for
+itself arrives with no session, and a nonce minted for a signed-in user is refused
+when it is sent without that user's cookie. `$_COOKIE` is still filled, from the
+same values, because `auth_redirect()` runs long before a cookie could come back
+from the browser.
 
 ### Two traps that look like broken code
 
@@ -573,6 +726,63 @@ update_option( 'woocommerce_store_pages_only', 'no' );
 Both, not one. With `woocommerce_store_pages_only` left at `yes` the shop and
 product pages stay behind the page while the rest of the site comes out, which
 reads as the first option not having worked.
+
+### What cannot be photographed
+
+Whoever writes the captions needs to know what this will not do, because a caption
+is a promise and the gap between the two is only ever found by a reader. The list
+is short and each line has been tried rather than assumed.
+
+Things that are often assumed to be out of reach and are not: a screen behind a
+log-in, including the storefront as a named customer; a screen that draws itself
+over admin-ajax, the REST API or the Store API; the block editor, which is REST
+and nonces throughout; a WooCommerce transactional email, through WooCommerce's
+own preview on the email settings screen, which a seed can point at a real order
+with the `woocommerce_email_preview_dummy_order` filter; and the whole admin
+screen with its menu, its toolbar and the plugin's own notice, by putting
+`pc_chrome=on` in the shot's own path. What follows is what is left.
+
+- **A hover or a focus state.** There is a `click` and there is nothing else: the
+  render has no pointer and no keyboard, so `:hover` never matches. A tooltip, a
+  menu that opens on hover and a focus ring cannot be photographed, and there is
+  no way to ask for one from a shot list.
+- **A control the operating system draws.** An open `<select>`, the browser's own
+  date picker, the colour picker: those are painted outside the page and are not
+  in a picture of the page at all. A drop-down built out of HTML is fine and opens
+  with `click`.
+- **Anything that only exists in the answer to a form submission.** The driver
+  renders a URL, so a screen reachable only by pressing a button is out of reach:
+  the wrong-password message on a log-in form, the result of a bulk action, an
+  order-received page reached by actually paying. Where the screen survives as a
+  URL of its own — `?settings-updated=true` and its like — ask for that URL and it
+  photographs normally.
+- **Anything that appears on scroll.** Chrome photographs the viewport, so the
+  render never scrolls: a sticky header in its stuck state, or a section that
+  reveals itself part way down, is not reachable. Widen or heighten the viewport
+  instead of trying to scroll to a subject; a rule with an edge off screen stops
+  the run rather than cropping to the part that was visible.
+- **A card form.** The fields belong to the payment gateway, are drawn from its
+  servers, and want its keys. Nothing here has any and nothing should be given
+  any. A checkout *is* photographable — cheque and cash on delivery draw
+  normally — but the moment a real gateway is in the picture, it is not.
+- **Anything whose content comes from somebody else's server**, which is worse
+  than unphotographable because it looks fine. It will usually render, since the
+  machine has a route out, but what is in the picture is whatever that server said
+  today, so the shot does not reproduce. Worse, the request check deliberately
+  ignores cross-origin requests — a page reaching a third party is not the page
+  drawing itself, and in a container with no route out every such request would
+  fail — so a third party that answers with an error does **not** refuse the shot.
+  Treat any screen with an embed in it as unchecked, and look at it.
+- **A pseudo-element's endless animation.** The infinite animations are stopped
+  before the shutter opens, but only on elements; one declared on a `::before` or
+  `::after` cannot be reached, and a shot containing one will not reproduce byte
+  for byte.
+
+Two of those are worth saying again because they are the ones that produce a file
+rather than an error: a third-party embed, and a pseudo-element animation. A green
+run is evidence that the pages loaded and the crops are in the right place. It is
+not evidence that the pictures show what a caption says they show, and nothing
+here can be.
 
 **Drive `docker compose` through this repo's scripts, never directly.**
 `scripts/lib.sh` sets `COMPOSE_PROJECT_NAME`, and it also decides which Compose
