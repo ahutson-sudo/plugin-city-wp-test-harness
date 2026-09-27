@@ -59,8 +59,11 @@ $GLOBALS['pc_seed_ids'] = array();
  * hardware shop differ by their name and their town and nothing else in here.
  *
  * @param array<string,mixed> $shop Optional: name, description, timezone,
- *                                  address, address_2, city, state, postcode,
- *                                  country, date_format.
+ *                                  address, address_2, city, postcode, country,
+ *                                  date_format. The state goes in `country` as
+ *                                  WooCommerce stores it, `US:NC`; a `state` key
+ *                                  was documented here and read by nothing, so a
+ *                                  shop that passed one was quietly put in Oregon.
  */
 function seed_us_shop( array $shop = array() ): void {
 	// There is no mail server behind the container, so every order email fails

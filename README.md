@@ -392,6 +392,21 @@ otherwise have to be worked out once per product lives here.
 `examples/screenshots.tsv` is a worked shot list, kept as the format's
 documentation.
 
+Where in the plugin's repository they live is the plugin's decision, and the one
+above — inside the plugin folder, so `eval-file` can reach it through the mount —
+is the convenient answer rather than the safe one. Two things to check before
+copying it:
+
+- **Whatever builds the plugin's release archive has to be excluding the folder.**
+  A build that only skips `tests/` and `node_modules/` will happily ship
+  `.screenshots/` to WordPress.org, product photographs and all. Putting the
+  folder at the repository root instead, beside the plugin folder, makes that
+  impossible rather than configured.
+- **A set photographed from a built archive is not in the mount at all**, which is
+  the arrangement to prefer: the pictures are then of the plugin a shop installs
+  rather than of a working tree with test files in it. Mount the extracted build
+  as `PLUGIN_PATH` and `docker cp` the seed into the container before running it.
+
 ### The shot list
 
 One line per shot, tab separated. Blank lines and `#` comments are ignored.
@@ -419,6 +434,28 @@ dimension from the same raw renders, with no recapture.
 A selector that matches nothing fails the run. Nothing warns you that a frame has
 quietly got *bigger*, which is the maintenance surface to watch: compare a new
 capture against the committed one before believing it.
+
+### What makes a capture reproducible
+
+Three things the driver does that only make sense once you have seen a set fail to
+reproduce, because none of them announces itself and none of them fails:
+
+- **Every path is rendered once before any of it is photographed.** A first
+  signed-in view of a site is not like the views after it. WordPress writes a
+  navigation menu out of the theme's fallback the first time somebody who may edit
+  one looks at a page, and WooCommerce hooks its header icons in around it, so a
+  storefront shot taken on a site nobody had visited had a header fourteen pixels
+  shorter than the same shot on the next run.
+- **The crop rule waits for the page to go quiet**, not for a fixed delay. A
+  variable product's form runs on jQuery and can empty the image column after the
+  load event.
+- **Images are eager and decode synchronously, and transitions are off.** Chrome
+  will paint before an asynchronous decode finishes, and a gallery that fades on a
+  CSS transition is not touching the document while it fades, so no amount of
+  waiting for quiet catches it.
+
+The one thing none of that can fix is a *different shop*, which is the next
+section.
 
 ### What reseeding costs you
 
@@ -552,6 +589,16 @@ project name matches:
 ```bash
 source scripts/lib.sh && pc_load_env && pc_compose logs wordpress
 ```
+
+**And clear those variables before driving a second checkout from the same
+shell.** `HARNESS_ROOT` and `COMPOSE_PROJECT_NAME` are honoured from the
+environment if they are already set, and both are exported, so a shell that has
+sourced `lib.sh` once carries the first checkout's values into everything it runs
+afterwards. Clone this repo somewhere else, run its scripts from that same shell,
+and they drive the first checkout's containers with the first plugin mounted. The
+symptom is `pc_compose ps -q wordpress` coming back empty, or an install that
+reports success against a stack you are not looking at. `unset HARNESS_ROOT
+COMPOSE_PROJECT_NAME` first, or use a new shell.
 
 ## GitHub Actions
 
