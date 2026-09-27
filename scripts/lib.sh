@@ -155,6 +155,11 @@ pc_load_env() {
   WC_VERSION="${WC_VERSION:-latest}"
   HPOS_MODE="${HPOS_MODE:-enabled}"
   WP_PORT="${WP_PORT:-8080}"
+  # Right for tests and wrong for screenshots. A suite wants one fixed timezone
+  # so a date assertion reads the same everywhere; a screenshot wants the
+  # timezone of the shop it is pretending to be, because the dates in the
+  # picture are the thing being sold. Default unchanged.
+  WP_TIMEZONE="${WP_TIMEZONE:-Europe/London}"
   PLUGIN_PATH="${PLUGIN_PATH:-}"
   PLUGIN_SLUG="${PLUGIN_SLUG:-}"
   EXTRA_PLUGIN_PATH="${EXTRA_PLUGIN_PATH:-}"
@@ -209,7 +214,7 @@ pc_load_env() {
   WPCLI_IMAGE_TAG="cli-php${PHP_VERSION}"
   COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-pc-${PLUGIN_SLUG:-harness}}"
 
-  export PHP_VERSION WP_VERSION WC_VERSION HPOS_MODE WP_PORT
+  export PHP_VERSION WP_VERSION WC_VERSION HPOS_MODE WP_PORT WP_TIMEZONE
   export PLUGIN_PATH PLUGIN_SLUG EXTRA_PLUGIN_PATH EXTRA_PLUGIN_SLUG PLUGIN_TEST_COMMAND
   export GENERIC_TEST_WC_INACTIVE PC_SKIP_GENERIC_TESTS PC_SKIP_PLUGIN_TESTS
   export PC_DB_WAIT_SECONDS
