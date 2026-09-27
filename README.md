@@ -81,6 +81,9 @@ plugin-city-wp-test-harness/
     run-plugin-tests.sh
     run-matrix.sh
     error-log.sh
+    screenshot.sh       # photograph the running plugin
+    crop-to-frame.py
+    contact-sheet.py
   tests/
     generic/          # harness-owned smoke tests
     helpers/          # reusable integration helpers
@@ -345,6 +348,8 @@ Each row resets volumes so image and database state do not leak. Edit the TSV to
 | `enable_hpos()` / `disable_hpos()` | Toggle HPOS |
 | `error_log_contents()` / `clear_error_logs()` | Inspect PHP / WP debug logs |
 | `assert_true()` / `assert_same()` | Tiny assertions |
+| `seed_us_shop()` | A US shop in dollars, for screenshots — see below |
+| `seed_record_id()` / `seed_finish()` | Record what a seed made, so a shot list need not know ids |
 
 Load them with:
 
@@ -357,6 +362,173 @@ WP-CLI passthrough:
 ```bash
 ./scripts/wp.sh wc --version
 ./scripts/wp.sh eval 'echo wp_timezone()->getName();'
+```
+
+## Screenshots
+
+The harness can photograph the plugin it is running. `scripts/screenshot.sh`
+walks a list of shots, renders each one in headless Chrome against the live site,
+and crops every picture to the subject the page marked for itself. Four shots
+take about twenty seconds, and the same shot list against the same seeded shop
+comes back byte for byte the same, so a restyled settings screen or a renamed
+field means re-running one command rather than spending an afternoon with a
+screenshot tool.
+
+```bash
+PLUGIN_PATH=../my-plugin PLUGIN_SLUG=my-plugin ./scripts/install.sh
+
+# Build the shop. The seed belongs to the plugin; see below.
+./scripts/wp.sh eval-file \
+  /var/www/html/wp-content/plugins/my-plugin/.screenshots/seed.php
+
+./scripts/screenshot.sh ../my-plugin/.screenshots/shots.tsv dist/screenshots
+python3 scripts/contact-sheet.py ../my-plugin/.screenshots/shots.tsv dist/screenshots
+```
+
+Two of those files belong to the plugin and not to the harness, because both are
+editorial rather than mechanical: the **seed** that builds a believable shop, and
+the **shot list** that says which screens sell the plugin. Everything that would
+otherwise have to be worked out once per product lives here.
+`examples/screenshots.tsv` is a worked shot list, kept as the format's
+documentation.
+
+### The shot list
+
+One line per shot, tab separated. Blank lines and `#` comments are ignored.
+
+| Column | Meaning |
+|---|---|
+| `name` | Output file stem, so `screenshot-1` writes `screenshot-1.png` |
+| `path` | Site-relative, e.g. `/product/a-book/` or `/wp-admin/admin.php?page=my-settings`. May carry `{{kind.key}}` placeholders |
+| `frame` | CSS selector list. The **union** of every match is what gets cropped to |
+| `click` | Selector clicked before the frame is measured, or `-` |
+| `pad` | Page pixels kept around the subject |
+| `margin` | Flat pixels of page colour added after cropping |
+| `width` `height` | Viewport in CSS pixels. The height only has to be enough to hold the subject, since the crop decides the result |
+| `caption` | Optional. The readme caption this shot answers. The capture ignores it; `contact-sheet.py` reads it |
+
+The frame is the union of every match rather than the first because wp-admin lays
+its columns out with floats: the wrapper that looks like the subject measures a
+few pixels high, and a frame drawn round it photographs a strip of nothing.
+
+Everything is rendered at device scale 2 and halved, because Chrome's 2x text
+downsampled is visibly cleaner than its 1x, and the published sets in this range
+are 1x. Deleting the `.resize()` in `scripts/crop-to-frame.py` doubles every
+dimension from the same raw renders, with no recapture.
+
+A selector that matches nothing fails the run. Nothing warns you that a frame has
+quietly got *bigger*, which is the maintenance surface to watch: compare a new
+capture against the committed one before believing it.
+
+### The seed, and the part of it that is shared
+
+`tests/helpers/seed-common.php` holds the part of a seed that is the same
+whatever the plugin is. Two calls, one at each end:
+
+```php
+require_once getenv( 'PC_HARNESS_ROOT' ) . '/tests/helpers/seed-common.php';
+
+PluginCity\Harness\seed_us_shop( array(
+    'name'     => 'Thornbury Books',
+    'address'  => '1408 NE Alberta St',
+    'city'     => 'Portland',
+    'postcode' => '97211',
+) );
+
+// ... the plugin's own catalogue, its own settings, and whatever state its
+// captions need. This part is irreducible and nobody can share it.
+
+PluginCity\Harness\seed_record_id( 'product', 'the-salt-path-home', $id );
+PluginCity\Harness\seed_finish();
+```
+
+`seed_us_shop()` puts the shop in the United States, in dollars, with US date
+order, and takes the two WooCommerce switches described below out of the way.
+Overrides are one array of named keys so a seed states only its differences — a
+bookshop and a hardware shop are not in the same town. `seed_finish()` drops the
+caches and writes the ids down, and both of those have to happen after the last
+write rather than after the shared ones, which is why the pair is a bookend.
+
+`WP_TIMEZONE` sets the timezone `install.sh` applies, for the sake of a suite that
+wants a fixed one. A seed sets its own anyway: the shop in the picture is in a
+town, and the seed is what knows which.
+
+### Ids stay out of the shot list
+
+A path that says `post.php?post=11` is half of one artefact filed in another
+place. The 11 came out of the seed, and reseeding the shop renumbers it without
+anything failing — the run photographs whatever is at that id now, so the set
+comes back wrong rather than missing, which is the expensive way round.
+
+So the seed records what it made and the shot list asks for it by name:
+
+```
+screenshot-2	/wp-admin/post.php?post={{product.the-salt-path-home}}&action=edit	…
+```
+
+`seed_record_id( 'product', 'the-salt-path-home', $id )` writes that into
+`pc-seed-ids.json` inside the disposable WordPress volume, and the driver fills
+it in before rendering. A placeholder nothing recorded **stops the run**, names
+itself, and lists what the seed did record under that kind. Leftover braces stop
+it too, so a mistyped placeholder cannot slip through as literal text and answer
+404 at a URL that then photographs perfectly well.
+
+### What the machine needs
+
+- **Headless Chrome on `PATH`**, as `google-chrome` or `chromium`.
+- **Python 3 with Pillow**, for `crop-to-frame.py` and `contact-sheet.py`.
+- **Fonts, if you generate any imagery of your own.** A box missing the face a
+  set was drawn with substitutes another one silently, and the letterforms change
+  with nothing to say so.
+
+### The shim mints a login cookie, and must stay in the container
+
+`scripts/screenshot.sh` writes a must-use plugin into the WordPress volume with a
+token generated for that run, and on a request carrying that token it **generates
+a valid authentication cookie** for the admin user. That is the only way to photograph
+wp-admin without driving a login form, and it is indefensible anywhere a real
+site could reach it.
+
+It is therefore installed into the disposable volume, deleted when the driver
+exits, and goes with the volume in any case. Do not copy
+`tests/helpers/screenshot-mode.php` into a plugin, and do not adapt it into
+anything that ships. The harness is the right home for it precisely because the
+harness is thrown away.
+
+### Two traps that look like broken code
+
+Both of these cost real time, neither logs anything, and both look like a fault
+in the plugin or a broken install.
+
+**A new store sits behind WooCommerce 11's Coming soon page.** Every storefront
+URL answers **HTTP 200** with a `wp-block-woocommerce-coming-soon` holding page.
+No error is raised and nothing is logged, so a capture succeeds, writes a file of
+the expected size, and the file is a picture of a holding page. `seed_us_shop()`
+clears it, and a seed that does not use the helper needs both options:
+
+```php
+update_option( 'woocommerce_coming_soon', 'no' );
+update_option( 'woocommerce_store_pages_only', 'no' );
+```
+
+Both, not one. With `woocommerce_store_pages_only` left at `yes` the shop and
+product pages stay behind the page while the rest of the site comes out, which
+reads as the first option not having worked.
+
+**Drive `docker compose` through this repo's scripts, never directly.**
+`scripts/lib.sh` sets `COMPOSE_PROJECT_NAME`, and it also decides which Compose
+files are in play. A bare `docker compose` in this directory therefore addresses
+a *different* project: `docker compose up` starts a second stack that fights the
+first for port 8080, and `docker compose logs` shows an empty one while the real
+containers carry on somewhere you are not looking. The result reads exactly like
+a broken install.
+
+Use `./scripts/start.sh`, `./scripts/stop.sh`, `./scripts/reset.sh` and
+`./scripts/wp.sh`. If you need Compose itself, source the library first so the
+project name matches:
+
+```bash
+source scripts/lib.sh && pc_load_env && pc_compose logs wordpress
 ```
 
 ## GitHub Actions
