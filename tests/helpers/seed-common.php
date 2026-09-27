@@ -145,6 +145,15 @@ function seed_us_shop( array $shop = array() ): void {
 function seed_open_the_storefront(): void {
 	update_option( 'woocommerce_coming_soon', 'no' );
 	update_option( 'woocommerce_store_pages_only', 'no' );
+
+	// Not the storefront, but the same shape of failure and the same one line to
+	// fix it. WooCommerce sends the first wp-admin request after it is activated
+	// to its own setup wizard, and on a fresh shop the first wp-admin request
+	// anybody makes is the camera's: the screen it was pointed at answers 302,
+	// nothing is framed, and the only thing said out loud is that no frame was
+	// found -- which reads as a wrong selector.
+	delete_transient( '_wc_activation_redirect' );
+	delete_option( '_wc_activation_redirect' );
 }
 
 /**
