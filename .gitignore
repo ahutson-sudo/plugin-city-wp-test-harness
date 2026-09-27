@@ -5,6 +5,11 @@
 # beside the readme that names it, so anything here is this checkout's scratch --
 # including the refused render the driver keeps when a shot is rejected.
 dist/
+
+# Python leaves this beside crop-to-frame.py the first time the driver runs it,
+# so a clean checkout that has taken one picture already has a dirty tree.
+__pycache__/
+
 .DS_Store
 .idea
 .vscode
