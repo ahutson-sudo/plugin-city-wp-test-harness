@@ -1,6 +1,10 @@
 .env
 .env.generated
 *.log
+# Where the capture writes. A finished set belongs in the plugin's own repository
+# beside the readme that names it, so anything here is this checkout's scratch --
+# including the refused render the driver keeps when a shot is rejected.
+dist/
 .DS_Store
 .idea
 .vscode

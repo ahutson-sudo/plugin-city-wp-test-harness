@@ -51,8 +51,8 @@ const PC_SHOT_NOBODY = 'visitor';
  * There is one render and no channel back out of it, so the verdict on whether
  * the page finished drawing itself travels as the colour of the rule.
  * scripts/crop-to-frame.py holds the same table and is the only thing that
- * reads it: magenta crops, and each of the other three stops the run and names
- * a different thing to go and fix. Keep the two lists in step.
+ * reads it: magenta crops, and each of the other four stops the run and names a
+ * different thing to go and fix. Keep the two lists in step.
  *
  * All five are colours nothing in wp-admin, in a block theme or in WooCommerce
  * draws, which is the only property they need.
