@@ -393,6 +393,27 @@ function pc_shot_print_script( string $click, string $frame, int $pad ): void {
 			var click=%1$s, frame=%2$s, pad=%3$d, rule=%4$s;
 			if(click){var c=document.querySelector(click); if(c){c.click();}}
 			if(!frame){return;}
+			/* An animation that never ends has no right moment in it. A progress
+			   bar with barber-pole stripes is somewhere different in its cycle
+			   every render, so two runs of the same shot list came back with the
+			   same set except for one band of one picture -- which is the kind of
+			   difference that gets committed and then cannot be explained.
+			   Stopping the animation drops each element back on the style it was
+			   animating from, which for decoration is the picture anyway.
+
+			   Only the endless ones, and unlike the transition rule this cannot
+			   be done in CSS: an entrance animation runs once, often from
+			   invisible, and turning that one off photographs nothing at all. */
+			function settle(){
+				var all=document.querySelectorAll("*");
+				for(var i=0;i<all.length;i++){
+					var s=getComputedStyle(all[i]);
+					if(s&&s.animationIterationCount&&s.animationIterationCount.indexOf("infinite")>=0){
+						all[i].style.animation="none";
+					}
+				}
+			}
+			settle();
 			var w=window.pcShotWatch||{inflight:0,failed:[]};
 			var touched=Date.now(), watching=null, drawn=null, verdict=null, steady=0, last=null;
 			if(window.MutationObserver){
@@ -492,6 +513,9 @@ function pc_shot_print_script( string $click, string $frame, int $pad ): void {
 					/* Disconnected before the rule goes in, or drawing it looks
 					   like one more mutation to wait for. */
 					if(watching){ watching.disconnect(); watching=null; }
+					/* Again, because the page has had a second to start
+					   something the first pass could not have seen. */
+					settle();
 					draw(drawn,verdict);
 					return;
 				}
