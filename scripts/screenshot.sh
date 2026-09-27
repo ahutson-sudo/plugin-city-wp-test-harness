@@ -150,6 +150,42 @@ shoot() {
   [ -s "$out" ]
 }
 
+# Every path is rendered once before any of them is photographed, and the
+# pictures from that pass are thrown away.
+#
+# A first signed-in view of a site is not like the views after it. WordPress and
+# WooCommerce both write things to the database the first time somebody who may
+# edit them looks at a page -- a block theme with no navigation menu gets one
+# persisted from the theme's fallback, and WooCommerce's header icons are hooked
+# in around it -- so a storefront shot taken on the first pass came back with a
+# header fourteen pixels shorter than the identical shot on the second. Nothing
+# failed. The two sets simply disagreed, and whichever had been committed was
+# the one nobody else could reproduce.
+#
+# Warming every path rather than just the home page is deliberate. What gets
+# written on a first view is WordPress's business and changes between releases,
+# so the only warm-up that stays correct is the set itself: whatever a shot's own
+# page settles on being viewed, it has settled before the shutter opens.
+#
+# The token has to be on the request. An anonymous view writes none of this,
+# which is why fetching the home page five times as a visitor changes nothing.
+# Failures are ignored: a page that cannot be served will fail its real shot
+# below, and that message names the URL and the shot.
+warm_count=0
+while IFS=$'\t' read -r _name _path _rest; do
+  case "${_name:-}" in ''|'#'*) continue;; esac
+  case "$_path" in
+    *'{{'*|*'}}'*) _path="$(resolve_path "$_path")" || exit 1;;
+  esac
+  case "$_path" in
+    *\?*) _warm="${base}${_path}&pc_shot=${token}";;
+    *)    _warm="${base}${_path}?pc_shot=${token}";;
+  esac
+  curl -fsS -o /dev/null --max-time 30 "$_warm" 2>/dev/null || true
+  warm_count=$(( warm_count + 1 ))
+done < "$shots"
+echo "Warmed ${warm_count} pages."
+
 count=0
 # 'caption' last so a ninth column lands there rather than being appended to
 # height, which is the one field a stray tab would corrupt silently.
