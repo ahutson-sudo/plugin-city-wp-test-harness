@@ -420,6 +420,28 @@ A selector that matches nothing fails the run. Nothing warns you that a frame ha
 quietly got *bigger*, which is the maintenance surface to watch: compare a new
 capture against the committed one before believing it.
 
+### What reseeding costs you
+
+Capture is reproducible; a shop is not. Re-run the driver against a shop already
+built and every file comes back identical. Rebuild the shop first and any screen
+printing a value the database chose will differ, because two of those values are
+not the seed's to choose:
+
+- **An id from a sequence.** WordPress hands out post ids in order and, with HPOS
+  on, orders draw from the same pool as posts, so each reseed lands the order a
+  few numbers further on. `#31` is not a number a seed can ask for.
+- **A wall clock.** WooCommerce stamps order notes with the time they are written,
+  and `maybe_set_date_paid()` stamps a paid order with `time()` rather than with
+  the date the order was created. A shot of an order therefore carries this
+  afternoon in it.
+
+The second one a seed can fix, and a seed photographing an order should:
+`$order->set_date_paid( $order->get_date_created() )` after the status is set puts
+the payment on the day the order says it was placed, which is what the picture
+ought to show anyway. The first one it cannot, so treat a difference confined to
+an id or a timestamp as the shop having been rebuilt, and compare the rest of the
+frame before going looking for a bug.
+
 ### The seed, and the part of it that is shared
 
 `tests/helpers/seed-common.php` holds the part of a seed that is the same
