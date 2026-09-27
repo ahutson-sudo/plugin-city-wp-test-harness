@@ -261,6 +261,43 @@ $order   = PluginCity\Harness\create_order(array('product' => $product));
 
 `PC_HARNESS_ROOT` is `/opt/pc-harness` inside the environment.
 
+### Asking whether an asset arrived, when the handle is somebody else's
+
+A test that asks `wp_style_is()` or `wp_script_is()` about a handle **another
+plugin registers** will answer no here even when the plugin under test is doing
+everything right. Register the handle yourself first:
+
+```php
+wp_register_style( 'woocommerce_admin_styles', WC()->plugin_url() . '/assets/css/admin.css', array(), WC_VERSION );
+
+Plugin::instance()->enqueue_admin_assets( 'woocommerce_page_my-settings' );
+
+PluginCity\Harness\assert_true( wp_style_is( 'woocommerce_admin_styles', 'enqueued' ), 'The picker is given its stylesheet' );
+```
+
+Two things combine to produce that false negative, and neither shows up in a
+browser:
+
+- Plugin tests run under `wp eval-file`, and WP-CLI fires neither `admin_init`
+  nor `admin_enqueue_scripts`. WooCommerce registers its admin script and
+  stylesheet on the first of those, so in here nothing has registered them.
+- `wp_enqueue_style()` of a handle nothing has registered is parked in
+  `WP_Dependencies::$queued_before_register`, which is private, rather than
+  going on the queue. `wp_style_is( …, 'enqueued' )` reads the queue, so it
+  answers no.
+
+On a real admin request the order is harmless: `WP_Dependencies::add()` empties
+that parked list as soon as the handle turns up, so the enqueue lands. Only a
+request where the handle never gets registered at all can see it, which is why
+this is a `wp eval-file` problem specifically.
+
+Worth spending the paragraph on because the failure points the wrong way. The
+test reads as "the plugin did not ask for the stylesheet", which is a real fault
+worth writing a test for — a borrowed picker given its script and not its
+stylesheet draws itself unstyled on top of the plain control it was meant to
+replace — so the obvious next move is to go looking in the plugin for a bug that
+is not there.
+
 ## Add another Plugin City plugin
 
 1. Keep the plugin in its own folder with its own tests
