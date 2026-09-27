@@ -9,12 +9,18 @@
 # from what the seed recorded, so reseeding the shop cannot quietly point a shot
 # at a different screen. A placeholder the seed never recorded stops the run.
 #
+# A placeholder resolves to a number, so it belongs where a URL wants a number:
+# the admin's post= and id=. A storefront permalink already names the product by
+# the slug the seed gave it, and screenshot-1 says so in full. Putting a
+# placeholder there photographs /product/11/, which is a 404 that crops and
+# saves like any other page.
+#
 # The caption is the last column and nothing in the capture reads it. It is here
 # because the caption and the screen it describes are one editorial decision, and
 # filing them apart is how a set comes to illustrate the wrong sentence.
 #
 # name	path	frame	click	pad	margin	width	height	caption
-screenshot-1	/product/{{product.the-salt-path-home}}/	header.wp-block-template-part, .wp-block-columns.alignwide	-	0	0	1280	1200	A product page selling ahead of release, with the date above the Pre-order button.
+screenshot-1	/product/the-salt-path-home/	header.wp-block-template-part, .wp-block-columns.alignwide	-	0	0	1280	1200	A product page selling ahead of release, with the date above the Pre-order button.
 screenshot-2	/wp-admin/post.php?post={{product.the-salt-path-home}}&action=edit	#woocommerce-product-data	.apofw_preorder_tab a	0	18	1160	1400	The Pre-order tab on the product, where the date is set.
 screenshot-3	/wp-admin/admin.php?page=apofw-settings	.apofw-settings__header, .apofw-settings-layout, .apofw-settings__footer	-	24	0	1400	1400	The settings screen, on the card that sets the button wording.
 screenshot-4	/wp-admin/admin.php?page=wc-orders&action=edit&id={{order.awaiting-release}}	#woocommerce-order-data, #woocommerce-order-items, #postbox-container-1	-	0	18	1220	1800	An order awaiting release, showing what was pre-ordered and when it is due.
