@@ -199,6 +199,19 @@ split_viewer() {
   esac
 }
 
+# The columns are positional, so one tab too few slides every one of them along
+# and the first thing to notice used to be Python failing to read the word
+# 'margin' as a number -- a traceback from the cropper, about a shot it names
+# nowhere, for a mistake in the shot list.
+whole_number() {
+  case "$2" in
+    ''|*[!0-9]*)
+      echo "${1}: '${2}' is not a whole number, so the columns have slipped. Check the tabs on that line." >&2
+      exit 1
+      ;;
+  esac
+}
+
 shot_url() {
   local path="$1" extra="${2:-}" viewer="$3" query
   query="pc_shot=${token}&pc_as=$(urlencode "$viewer")${extra}"
@@ -358,6 +371,11 @@ while IFS=$'\t' read -r name path frame click pad margin width height caption; d
   case "$path" in
     *'{{'*|*'}}'*) path="$(resolve_path "$path")" || exit 1;;
   esac
+
+  whole_number "$name" "$pad"
+  whole_number "$name" "$margin"
+  whole_number "$name" "$width"
+  whole_number "$name" "$height"
 
   extra="&pc_frame=$(urlencode "$frame")&pc_pad=${pad}$(allowed_params "$name")"
   [ "$click" != "-" ] && extra="${extra}&pc_click=$(urlencode "$click")"
