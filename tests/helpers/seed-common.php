@@ -40,9 +40,26 @@ const SEED_IDS_FILE = '/var/www/html/pc-seed-ids.json';
 /**
  * Ids recorded so far, as kind => key => id.
  *
+ * Seeded from the file if one is already there, because a product photographed
+ * in two editions wants its shop built by one seed and the paid extras added by
+ * a second, and wp-cli runs each of those in a process of its own. Starting
+ * empty, the second seed_finish() wrote a file holding only what the second seed
+ * had made and every placeholder naming the shop stopped resolving -- a failure
+ * that reads as a shot list typo rather than as the file having been truncated.
+ *
  * @var array<string,array<string,int>>
  */
 $GLOBALS['pc_seed_ids'] = array();
+
+if ( is_readable( SEED_IDS_FILE ) ) {
+	$pc_seed_existing = json_decode( (string) file_get_contents( SEED_IDS_FILE ), true );
+
+	if ( is_array( $pc_seed_existing ) ) {
+		$GLOBALS['pc_seed_ids'] = $pc_seed_existing;
+	}
+
+	unset( $pc_seed_existing );
+}
 
 /**
  * Make the shop a United States shop, in dollars, with US dates.
