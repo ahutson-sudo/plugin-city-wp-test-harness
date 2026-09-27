@@ -26,6 +26,10 @@
  * $_COOKIE is filled from the same values so that one session token covers the
  * page and everything it asks for. See pc_shot_sign_in().
  *
+ * And signing in on *every* request is not enough either, which is the third of
+ * them and the quietest. See pc_shot_sign_in() again: a session is minted once
+ * per browser, not once per request.
+ *
  * It has to happen on plugins_loaded rather than at file scope, because
  * wp-settings.php loads must-use plugins *before* wp_cookie_constants(), so
  * reading LOGGED_IN_COOKIE any earlier is a fatal error on every request.
@@ -195,6 +199,16 @@ add_action(
  * cookie that printed it, so the page and the requests it makes have to be
  * carrying the same token or every nonce on the screen is refused.
  *
+ * Which is also why a browser that is already signed in is left alone. Every
+ * call mints a *new* session token, and this runs before anything verifies a
+ * nonce, so signing in unconditionally means a form drawn on one request has its
+ * nonce checked against a token that did not exist when it was printed. Nothing
+ * says so: the POST is refused, and the screen answering it draws as though
+ * nothing had been asked -- which photographs perfectly well. The check is made
+ * on the logged-in cookie because that is the one every nonce is bound to, and
+ * on a wp-admin request the browser sends the auth cookie beside it or the
+ * screen would not have rendered at all.
+ *
  * Nothing here sets SameSite, which leaves Chrome's default of Lax. Every
  * request a shot makes is to the same origin as the page, so Lax sends the
  * cookie; and the cookies are not marked secure, because the harness is served
@@ -211,6 +225,12 @@ add_action(
  * @param WP_User $user The user to be photographed as.
  */
 function pc_shot_sign_in( WP_User $user ): void {
+	$held = isset( $_COOKIE[ LOGGED_IN_COOKIE ] ) ? (string) $_COOKIE[ LOGGED_IN_COOKIE ] : '';
+
+	if ( '' !== $held && (int) $user->ID === (int) wp_validate_auth_cookie( $held, 'logged_in' ) ) {
+		return;
+	}
+
 	add_action(
 		'set_auth_cookie',
 		static function ( $cookie, $expire, $expiration, $user_id, $scheme ): void {
