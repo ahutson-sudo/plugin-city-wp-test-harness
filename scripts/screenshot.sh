@@ -7,17 +7,20 @@
 # is an editorial decision and the only part of this that cannot be automated.
 # Columns, tab separated, '#' comments and blank lines ignored:
 #
-#   name  path  frame-selector  click-selector  pad  margin  width  height
+#   name  path  frame-selector  click-selector  pad  margin  width  height  caption
 #
 #   name             output file stem, e.g. screenshot-1
 #   path             site-relative, e.g. /product/a-book/ or
-#                    /wp-admin/admin.php?page=my-settings
+#                    /wp-admin/admin.php?page=my-settings. May carry
+#                    {{kind.key}} placeholders for ids the seed created
 #   frame-selector   CSS selector list; the union of every match is the crop
 #   click-selector   clicked before the frame is measured, or '-'
 #   pad              page pixels kept round the subject
 #   margin           flat pixels of page colour added after cropping
 #   width height     viewport in CSS pixels; height only has to be enough to
 #                    hold the subject, since the crop decides the result
+#   caption          optional; the readme caption this shot answers. Nothing
+#                    here reads it, scripts/contact-sheet.py does
 #
 # Everything is rendered at device scale 2 and halved, because Chrome's 2x text
 # downsampled is visibly cleaner than its 1x, and the published sets in this
@@ -57,6 +60,65 @@ base="http://localhost:${WP_PORT}"
 
 urlencode() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
 
+# A shot list used to carry the ids the seed happened to mint -- post=11, id=31
+# -- which made the seed and the shot list one artefact filed in two places. A
+# reseeded shop renumbers them and nothing fails: the run photographs whatever
+# is at that id now, or a 404, and the pictures come back wrong rather than
+# missing. So a seed records what it made and a path says
+# {{product.the-salt-path-home}} instead.
+#
+# tests/helpers/seed-common.php writes this file; the path is spelled out in
+# both places and each says so.
+seed_ids_file=/var/www/html/pc-seed-ids.json
+seed_ids_json=''
+if docker exec "$container" test -f "$seed_ids_file" >/dev/null 2>&1; then
+  seed_ids_json="$(docker exec "$container" cat "$seed_ids_file")"
+fi
+
+# The failure has to be loud. Rendering a URL with the braces still in it is the
+# one outcome worth engineering against: it answers 404, gets photographed
+# successfully, and then the crop fails for a reason that has nothing to do with
+# the cause.
+resolve_path() {
+  python3 - "$1" "$seed_ids_json" <<'PY'
+import json
+import re
+import sys
+
+path, raw = sys.argv[1], sys.argv[2]
+ids = json.loads(raw) if raw.strip() else {}
+
+
+def resolve(match):
+    token = match.group(1).strip()
+    shown = '{{' + token + '}}'
+    kind, dot, key = token.partition('.')
+
+    if not dot or not kind or not key:
+        sys.exit(shown + ' is not kind.key -- write it like {{product.some-slug}}')
+
+    of_that_kind = ids.get(kind) or {}
+    if key not in of_that_kind:
+        known = ', '.join(sorted(of_that_kind)) or '(nothing of that kind)'
+        sys.exit(
+            'Nothing recorded for ' + shown + '.\n'
+            '  Recorded under ' + kind + ': ' + known + '\n'
+            "  The seed needs seed_record_id( '" + kind + "', '" + key + "', $id ),"
+            ' and seed_finish() to write the file.'
+        )
+
+    return str(of_that_kind[key])
+
+
+out = re.sub(r'\{\{([^{}]*)\}\}', resolve, path)
+
+if '{{' in out or '}}' in out:
+    sys.exit('Braces left over in ' + out + ': a placeholder is malformed.')
+
+print(out)
+PY
+}
+
 # Chrome writes its PNG and then hangs on dbus and xdg lookups that have no
 # service behind them in a container-shaped machine, so waiting for the process
 # costs the full timeout -- ninety seconds a frame. Watching the file instead
@@ -89,8 +151,14 @@ shoot() {
 }
 
 count=0
-while IFS=$'\t' read -r name path frame click pad margin width height; do
+# 'caption' last so a ninth column lands there rather than being appended to
+# height, which is the one field a stray tab would corrupt silently.
+while IFS=$'\t' read -r name path frame click pad margin width height caption; do
   case "${name:-}" in ''|'#'*) continue;; esac
+
+  case "$path" in
+    *'{{'*|*'}}'*) path="$(resolve_path "$path")" || exit 1;;
+  esac
 
   query="pc_shot=${token}&pc_frame=$(urlencode "$frame")&pc_pad=${pad}"
   [ "$click" != "-" ] && query="${query}&pc_click=$(urlencode "$click")"
