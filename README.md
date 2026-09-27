@@ -505,10 +505,12 @@ not been photographed at all.
 What the page asserts is deliberately positive. Not "no error text on the screen",
 which only ever catches the failures somebody had already thought of, but: every
 same-origin request this page made in order to draw itself finished and answered,
-the subject measures the same twice running, and the rule round it closes on all
-four sides. Requests to other origins are left out, because a page reaching a
-third party is not the page drawing itself, and in a container with no route to one
-every such request fails whether or not anything is wrong.
+and the subject measures the same twice running. Requests to other origins are
+left out, because a page reaching a third party is not the page drawing itself,
+and in a container with no route to one every such request fails whether or not
+anything is wrong. The cropper adds the one assertion the page cannot make about
+itself — that the rule closes on all four sides, so the subject was not bigger
+than the viewport it was rendered in.
 
 The driver adds the half of that a browser cannot do. The warm-up pass fetches
 each page with `curl`, which is the one moment in a capture when something can
