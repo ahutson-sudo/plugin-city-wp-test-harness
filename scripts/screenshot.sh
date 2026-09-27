@@ -17,7 +17,11 @@
 #                    shopper who has not signed in, 'jo:/my-account/' for the
 #                    login jo. Without a prefix, the administrator
 #   frame-selector   CSS selector list; the union of every match is the crop
-#   click-selector   clicked before the frame is measured, or '-'
+#   click-selector   what to do before the frame is measured, or '-'. One step,
+#                    or several separated by '|'. A step is a selector to click;
+#                    a step written 'selector ::= value' types the value into
+#                    that field instead. Every step has to happen or the shot is
+#                    refused and the step is named
 #   pad              page pixels kept round the subject
 #   margin           flat pixels of page colour added after cropping
 #   width height     viewport in CSS pixels; height only has to be enough to

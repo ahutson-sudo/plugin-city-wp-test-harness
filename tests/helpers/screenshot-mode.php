@@ -55,10 +55,10 @@ const PC_SHOT_NOBODY = 'visitor';
  * There is one render and no channel back out of it, so the verdict on whether
  * the page finished drawing itself travels as the colour of the rule.
  * scripts/crop-to-frame.py holds the same table and is the only thing that
- * reads it: magenta crops, and each of the other four stops the run and names a
+ * reads it: magenta crops, and each of the other five stops the run and names a
  * different thing to go and fix. Keep the two lists in step.
  *
- * All five are colours nothing in wp-admin, in a block theme or in WooCommerce
+ * All six are colours nothing in wp-admin, in a block theme or in WooCommerce
  * draws, which is the only property they need.
  */
 const PC_SHOT_RULE = array(
@@ -67,6 +67,7 @@ const PC_SHOT_RULE = array(
 	'pending' => '#00ffff',
 	'moved'   => '#ffff00',
 	'stale'   => '#ff0000',
+	'undone'  => '#0000ff',
 );
 
 add_action(
@@ -174,8 +175,11 @@ add_action(
 			add_action( 'wp_head', $watcher, 0 );
 		}
 
-		$script = static function () use ( $click, $frame, $pad ): void {
-			pc_shot_print_script( $click, $frame, $pad );
+		$posted = isset( $_SERVER['REQUEST_METHOD'] )
+			&& 'POST' === strtoupper( sanitize_text_field( wp_unslash( (string) $_SERVER['REQUEST_METHOD'] ) ) );
+
+		$script = static function () use ( $click, $frame, $pad, $posted ): void {
+			pc_shot_print_script( $click, $frame, $pad, $posted );
 		};
 
 		add_action( 'admin_footer', $script, 999 );
@@ -369,12 +373,86 @@ function pc_shot_print_watcher( array $excuse = array() ): void {
 }
 
 /**
- * Open a tab, wait for the page to finish, and draw the rule the cropper reads.
+ * Read pc_click as the sequence of things to do before the picture is taken.
+ *
+ * One step per '|', and a step written 'selector ::= value' types the value into
+ * the field rather than clicking it. Both tokens were inherited from the first
+ * shot list that needed a sequence and both were kept, for opposite reasons.
+ *
+ * '::=' cannot be mistaken for CSS. A selector may contain a colon and may
+ * contain two, but ':: =' is not a pseudo-element and nothing in the language
+ * puts an equals sign after one. Everything after the first '::=' is the value,
+ * rejoined, so a value may contain the token even though a selector cannot.
+ *
+ * '|' can be mistaken for CSS, in [lang|="en"], and a value a shop types could
+ * contain one too. There is no separator that could not: this column carries
+ * arbitrary strings in a file whose columns are already separated by tabs. So
+ * the collision is made loud rather than legislated away -- a selector cut in
+ * half either stops being a selector the browser will parse or stops matching
+ * anything, and both refuse the shot and name the step. Neither is silent, which
+ * is the property that matters.
+ *
+ * @param string $click The pc_click parameter as the shot list wrote it.
+ *
+ * @return array<int,array{find:string,type:string|null,said:string}>
+ */
+function pc_shot_steps( string $click ): array {
+	$steps = array();
+
+	if ( '' === trim( $click ) ) {
+		return $steps;
+	}
+
+	foreach ( explode( '|', $click ) as $one ) {
+		$one = trim( $one );
+		$at  = strpos( $one, '::=' );
+
+		if ( false === $at ) {
+			$steps[] = array(
+				'find' => $one,
+				'type' => null,
+				'said' => $one,
+			);
+			continue;
+		}
+
+		$steps[] = array(
+			'find' => trim( substr( $one, 0, $at ) ),
+			'type' => trim( substr( $one, $at + 3 ) ),
+			'said' => $one,
+		);
+	}
+
+	return $steps;
+}
+
+/**
+ * Take the steps, wait for the page to finish, and draw the rule the cropper reads.
  *
  * pc_click exists because a tabbed metabox opens on whichever tab its own
  * script picked and a still photograph cannot click. Firing the real click
  * rather than forcing a panel visible with CSS keeps the chosen tab drawn the
  * way its own plugin draws an active one.
+ *
+ * A sequence exists because some screens cannot be reached by asking for a URL
+ * at all. A panel that answers a form has nothing on it until the form has been
+ * filled in and submitted, and a picture of the empty one is a picture of a
+ * feature not working. So the steps fill it in and press the button.
+ *
+ * Every step has to happen, and a step that did not is a refusal rather than
+ * something to carry on past. A form filled in with two of its three fields
+ * photographs perfectly well, and so does a panel that was never asked anything:
+ * those two pictures are the whole reason this is checked at all rather than
+ * hoped for.
+ *
+ * The request watch below cannot see the last step, and it is worth being exact
+ * about why. It counts what the page fetches for itself; submitting a form is a
+ * navigation, so the POST is not a request this document ever makes -- it is the
+ * reason the next document exists. What answers for it instead is $posted: the
+ * steps are remembered in sessionStorage, which is the one thing that survives a
+ * navigation in the same tab, so the document that comes back can tell that a
+ * sequence ran, that it ran to the end, and that it itself arrived as the answer
+ * to a POST. Everything that document then loads for itself is watched as usual.
  *
  * pc_frame exists because the crop is the part of this job most easily got
  * wrong by hand: a box read off a preview is out by a few pixels, and the
@@ -403,15 +481,80 @@ function pc_shot_print_watcher( array $excuse = array() ): void {
  * there is patience left a subject that has moved is simply measured again; the
  * refusal is for one that is still moving when the patience runs out.
  *
- * @param string $click Selector to click first, or ''.
- * @param string $frame Selector list whose union is the subject, or ''.
- * @param int    $pad   Pixels of page to keep around the subject.
+ * @param string $click  Steps to take first, or ''.
+ * @param string $frame  Selector list whose union is the subject, or ''.
+ * @param int    $pad    Pixels of page to keep around the subject.
+ * @param bool   $posted Whether this document is the answer to a POST.
  */
-function pc_shot_print_script( string $click, string $frame, int $pad ): void {
+function pc_shot_print_script( string $click, string $frame, int $pad, bool $posted = false ): void {
 	printf(
 		'<script>window.addEventListener("load",function(){
-			var click=%1$s, frame=%2$s, pad=%3$d, rule=%4$s;
-			if(click){var c=document.querySelector(click); if(c){c.click();}}
+			var steps=%1$s, frame=%2$s, pad=%3$d, rule=%4$s, posted=%5$s, key=%6$s;
+			var report="";
+			/* Where the sequence got to, kept across the navigation the last step
+			   causes. A fresh browser profile per shot means nothing here is ever
+			   another shot\'s. */
+			var MARK="pc-shot-steps", store=null, prior=null;
+			try{
+				window.sessionStorage.setItem(MARK+"-probe","1");
+				window.sessionStorage.removeItem(MARK+"-probe");
+				store=window.sessionStorage;
+				prior=JSON.parse(store.getItem(MARK)||"null");
+			}catch(e){ store=null; prior=null; }
+			if(prior&&prior.of!==key){ prior=null; }
+			var state={of:key,at:0,done:0,click:0,why:""};
+			function keep(){ if(store){ try{ store.setItem(MARK,JSON.stringify(state)); }catch(e){} } }
+			function stopped(i,because){
+				state.why="step "+(i+1)+" of "+steps.length+" did not happen: "+because;
+				report=state.why;
+				keep();
+			}
+			function take(){
+				for(var i=0;i<steps.length;i++){
+					var s=steps[i], node=null;
+					state.at=i+1; keep();
+					if(!s.find){ stopped(i,"there is no selector in it"); return; }
+					try{ node=document.querySelector(s.find); }
+					catch(e){ stopped(i,"the browser does not understand \\""+s.find+"\\" as a selector"); return; }
+					if(!node){ stopped(i,"nothing on this page matches \\""+s.find+"\\""); return; }
+					if(null===s.type){
+						/* Written down before the click, because a click that
+						   submits a form is the last thing this document does. */
+						state.done=i+1; state.click=i+1; keep();
+						node.click();
+						continue;
+					}
+					if(!("value" in node)){ stopped(i,"\\""+s.find+"\\" is not a field, so there is nowhere to type \\""+s.type+"\\""); return; }
+					if(node.focus){ node.focus(); }
+					node.value=s.type;
+					node.dispatchEvent(new Event("input",{bubbles:true}));
+					node.dispatchEvent(new Event("change",{bubbles:true}));
+					/* A menu refuses a value it has no entry for and reads back
+					   empty, which is how a shot list naming a shipping class the
+					   shop has not got would otherwise photograph a form with one
+					   field blank. */
+					if(String(node.value)!==String(s.type)){
+						stopped(i,"\\""+s.find+"\\" would not take \\""+s.type+"\\" and reads \\""+node.value+"\\"");
+						return;
+					}
+					state.done=i+1; keep();
+				}
+			}
+			if(steps.length){
+				if(!store){
+					report="this browser would not remember which steps had been taken, so a sequence cannot be followed";
+				}else if(!prior){
+					take();
+				}else if(prior.why){
+					report=prior.why;
+				}else if(prior.done<steps.length){
+					report="step "+prior.at+" of "+steps.length+" left the page before the rest of the sequence ran";
+				}else if(prior.click!==steps.length){
+					report="the page was left by step "+(prior.click||prior.at)+" of "+steps.length+", and only the last step may submit a form";
+				}else if(!posted){
+					report="the sequence finished and the page changed, but what came back was not the answer to a form: nothing was asked";
+				}
+			}
 			if(!frame){return;}
 			/* An animation that never ends has no right moment in it. A progress
 			   bar with barber-pole stripes is somewhere different in its cycle
@@ -466,6 +609,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad ): void {
 				return (w.excuse||[]).filter(function(e){ return !(w.used||{})[e]; });
 			}
 			function whyNow(){
+				if(report){ return "undone"; }
 				if(w.failed.length){ return "failed"; }
 				if(w.inflight>0){ return "pending"; }
 				return unused().length?"stale":"ok";
@@ -475,6 +619,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad ): void {
 			}
 			function say(v){
 				var lines=w.failed.slice(0);
+				if("undone"===v){ lines.push(report); }
 				if("pending"===v){ lines.push(w.inflight+" request(s) had not answered when the picture was taken"); }
 				if("moved"===v){ lines.push("the subject was still moving when the picture was taken"); }
 				if("stale"===v){ lines.push("nothing on this page asked for: "+unused().join(", ")); }
@@ -519,6 +664,20 @@ function pc_shot_print_script( string $click, string $frame, int $pad ): void {
 			}
 			setInterval(function(){
 				var now=Date.now(), here=measure();
+				/* A sequence that did not finish is not something waiting will
+				   mend, and the screen is the wrong screen however settled it
+				   looks. The rule goes on whatever can be measured, and on a
+				   rectangle of its own if the subject is not there to measure --
+				   a missing rule reads as a wrong selector, and the selector may
+				   be the one thing here that is right. */
+				if(report){
+					if(drawn){ return; }
+					drawn=here||{left:8,top:240,right:Math.min(608,(window.innerWidth||800)-8),bottom:400};
+					verdict="undone";
+					if(watching){ watching.disconnect(); watching=null; }
+					draw(drawn,verdict);
+					return;
+				}
 				if(!drawn){
 					steady=put(here,last)?steady+1:0;
 					last=here;
@@ -562,9 +721,11 @@ function pc_shot_print_script( string $click, string $frame, int $pad ): void {
 				if("moved"!==verdict){ verdict="moved"; draw(drawn,verdict); }
 			},150);
 		});</script>',
-		wp_json_encode( $click ),
+		wp_json_encode( pc_shot_steps( $click ) ),
 		wp_json_encode( $frame ),
 		$pad,
-		wp_json_encode( PC_SHOT_RULE )
+		wp_json_encode( PC_SHOT_RULE ),
+		$posted ? 'true' : 'false',
+		wp_json_encode( $click )
 	);
 }

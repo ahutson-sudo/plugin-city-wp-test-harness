@@ -10,7 +10,7 @@ a field still comes out framed correctly, and nobody has to re-measure.
 
 The rule's colour is also the page's verdict on itself, because a render is one
 way traffic and there is nowhere else to put it. Magenta means the page finished
-drawing itself and the crop may be taken. The other four each stop the run:
+drawing itself and the crop may be taken. The other five each stop the run:
 nothing is saved, and the reason is named. Keep this table in step with
 PC_SHOT_RULE in the shim.
 
@@ -37,6 +37,7 @@ VERDICTS = (
     ("pending", "low", "high", "high"),
     ("moved", "high", "high", "low"),
     ("stale", "high", "low", "low"),
+    ("undone", "low", "low", "high"),
 )
 
 REFUSED = {
@@ -57,6 +58,11 @@ REFUSED = {
         "an allow line in the shot list named a request this page never makes, so "
         "the check it switches off is switched off for nothing. The fragment is "
         "written across the top of the raw render: delete that line."
+    ),
+    "undone": (
+        "one of the steps in this shot's click column did not happen, so this is "
+        "not the screen the shot asked for. Which step, and what stopped it, is "
+        "written across the top of the raw render."
     ),
 }
 
