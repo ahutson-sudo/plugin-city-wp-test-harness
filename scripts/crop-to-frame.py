@@ -118,12 +118,25 @@ def open_edges(mask, box):
 
 
 def page_colour(im, box):
-    """The colour just outside the frame, so an added margin matches the screen."""
-    left, top, right, _ = box
+    """The colour just outside the frame, so an added margin matches the screen.
+
+    Above the frame, and below it when there is no above. A subject against the
+    top of the document has its frame clamped to y=0, and a sample taken six
+    pixels higher than that lands on the rule: every picture that asked for a
+    margin got a bright magenta one, on the one shot in a set where the frame
+    happens to start at the top of the page.
+    """
+    left, top, right, bottom = box
     px = im.load()
-    y = max(0, top - 6)
-    samples = [px[x, y][:3] for x in range(left, min(right, im.width), 9)]
-    return max(set(samples), key=samples.count) if samples else (240, 240, 241)
+
+    for y in (top - 6, bottom + 5):
+        if not 0 <= y < im.height:
+            continue
+        samples = [px[x, y][:3] for x in range(left, min(right, im.width), 9)]
+        if samples:
+            return max(set(samples), key=samples.count)
+
+    return (240, 240, 241)
 
 
 def main() -> int:
