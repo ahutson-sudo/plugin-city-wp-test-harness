@@ -1,21 +1,30 @@
 <?php
 /**
  * Plugin Name: PluginCity screenshot mode
- * Description: Signs a headless browser into wp-admin, strips the furniture, and marks the subject of each shot so it can be cropped exactly. Installed into the harness's disposable WordPress volume by scripts/screenshot.sh.
+ * Description: Signs a headless browser into the site, strips the furniture, marks the subject of each shot so it can be cropped exactly, and refuses the frame when the page did not finish drawing itself. Installed into the harness's disposable WordPress volume by scripts/screenshot.sh.
  *
  * @package PluginCityHarness
  *
  * This file is copied into wp-content/mu-plugins by the screenshot driver with
- * its token substituted. It is deliberately not part of any plugin: it mints
- * an authentication cookie on request, which belongs only inside a throwaway
- * container.
+ * its token substituted. It is deliberately not part of any plugin: on request
+ * it signs a browser in as any user on the site, which belongs only inside a
+ * throwaway container.
  *
- * Two things here are not obvious and both cost an afternoon.
+ * Three things here are not obvious and each of them cost an afternoon.
  *
  * Filtering determine_current_user is not enough. wp-admin/admin.php calls
  * auth_redirect(), which asks wp_validate_auth_cookie() directly and never
  * consults that filter, so every admin screen bounces to wp-login.php. Putting
  * a genuine wp_generate_auth_cookie() value into $_COOKIE does work.
+ *
+ * $_COOKIE alone is not enough either, and that is the harder half. It signs
+ * the *server* in for the request being rendered and leaves the browser
+ * anonymous, so every request the page then makes for itself -- admin-ajax, the
+ * REST API, WooCommerce's Store API -- arrives with no session, and a nonce
+ * minted for a signed-in user is not valid when it is sent without that user's
+ * cookie. The browser therefore gets real Set-Cookie headers as well, and
+ * $_COOKIE is filled from the same values so that one session token covers the
+ * page and everything it asks for. See pc_shot_sign_in().
  *
  * It has to happen on plugins_loaded rather than at file scope, because
  * wp-settings.php loads must-use plugins *before* wp_cookie_constants(), so
@@ -25,7 +34,36 @@
 defined( 'ABSPATH' ) || exit;
 
 const PC_SHOT_TOKEN = 'REPLACE_TOKEN';
-const PC_SHOT_USER  = 'admin';
+
+/**
+ * Who a shot is taken as when its path does not say otherwise.
+ */
+const PC_SHOT_USER = 'admin';
+
+/**
+ * What a shot list writes instead of a login to be photographed signed out.
+ */
+const PC_SHOT_NOBODY = 'visitor';
+
+/**
+ * The colours the rule round the subject may be drawn in.
+ *
+ * There is one render and no channel back out of it, so the verdict on whether
+ * the page finished drawing itself travels as the colour of the rule.
+ * scripts/crop-to-frame.py holds the same table and is the only thing that
+ * reads it: magenta crops, and each of the other three stops the run and names
+ * a different thing to go and fix. Keep the two lists in step.
+ *
+ * All five are colours nothing in wp-admin, in a block theme or in WooCommerce
+ * draws, which is the only property they need.
+ */
+const PC_SHOT_RULE = array(
+	'ok'      => '#ff00ff',
+	'failed'  => '#00ff00',
+	'pending' => '#00ffff',
+	'moved'   => '#ffff00',
+	'stale'   => '#ff0000',
+);
 
 add_action(
 	'plugins_loaded',
@@ -35,29 +73,30 @@ add_action(
 			return;
 		}
 
-		$user = get_user_by( 'login', PC_SHOT_USER );
+		$viewer = isset( $_GET['pc_as'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['pc_as'] ) ) : PC_SHOT_USER;
 
-		if ( ! $user ) {
-			return;
+		// The driver reads both of these off the warm-up request with curl,
+		// which is the one moment in a capture when something other than a
+		// browser is looking. A shot list asking to be photographed as somebody
+		// the shop has never heard of is a wrong picture waiting to happen --
+		// signed out where it meant to be signed in -- and the answer to it is
+		// a header, because a picture cannot carry the reason.
+		if ( PC_SHOT_NOBODY === $viewer ) {
+			header( 'X-Pc-Shot-Viewer: ' . PC_SHOT_NOBODY );
+		} else {
+			$user = get_user_by( 'login', $viewer );
+
+			if ( ! $user ) {
+				header( 'X-Pc-Shot-Error: no user called ' . $viewer );
+				return;
+			}
+
+			pc_shot_sign_in( $user );
+			header( 'X-Pc-Shot-Viewer: ' . $user->user_login );
+			// Named rather than assumed, so the driver can require that this
+			// same response really did set it. A site can rename the cookie.
+			header( 'X-Pc-Shot-Session: ' . LOGGED_IN_COOKIE );
 		}
-
-		$expiry = time() + HOUR_IN_SECONDS;
-
-		$_COOKIE[ LOGGED_IN_COOKIE ] = wp_generate_auth_cookie( $user->ID, $expiry, 'logged_in' );
-		$_COOKIE[ AUTH_COOKIE ]      = wp_generate_auth_cookie( $user->ID, $expiry, 'auth' );
-
-		// The cookie lives in $_COOKIE and never reaches the browser, so the
-		// heartbeat's auth check comes back logged out and WordPress draws its
-		// "session has expired" log-in panel over the middle of the screen.
-		add_action(
-			'init',
-			static function (): void {
-				remove_action( 'admin_enqueue_scripts', 'wp_auth_check_load' );
-				remove_action( 'wp_enqueue_scripts', 'wp_auth_check_load' );
-				remove_action( 'admin_print_footer_scripts', 'wp_auth_check_html', 5 );
-			},
-			1
-		);
 
 		// WordPress and WooCommerce both draw banners across the top of every
 		// admin screen, over whatever is being photographed.
@@ -103,10 +142,32 @@ add_action(
 		$click = isset( $_GET['pc_click'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['pc_click'] ) ) : '';
 		$frame = isset( $_GET['pc_frame'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['pc_frame'] ) ) : '';
 		$pad   = isset( $_GET['pc_pad'] ) ? absint( $_GET['pc_pad'] ) : 0;
+
+		$allow = array();
+		if ( isset( $_GET['pc_allow'] ) && is_array( $_GET['pc_allow'] ) ) {
+			foreach ( wp_unslash( $_GET['pc_allow'] ) as $one ) {
+				$one = sanitize_text_field( (string) $one );
+				if ( '' !== $one ) {
+					$allow[] = $one;
+				}
+			}
+		}
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
 		if ( '' === $click && '' === $frame ) {
 			return;
+		}
+
+		if ( '' !== $frame ) {
+			// Before any script the page enqueues, because it counts the
+			// requests they make. print_head_scripts runs on
+			// admin_print_scripts at 20 and on wp_head at 9.
+			$watcher = static function () use ( $allow ): void {
+				pc_shot_print_watcher( $allow );
+			};
+
+			add_action( 'admin_print_scripts', $watcher, 1 );
+			add_action( 'wp_head', $watcher, 0 );
 		}
 
 		$script = static function () use ( $click, $frame, $pad ): void {
@@ -118,6 +179,60 @@ add_action(
 	},
 	0
 );
+
+/**
+ * Sign this request in, and sign the browser in with it.
+ *
+ * wp_set_auth_cookie() is the whole of the mechanism: it mints a session token,
+ * writes it into the user's session list, and sends the two cookies WordPress
+ * itself sends after a successful log-in. The two actions copy those exact
+ * values into $_COOKIE, which is what the request in flight is validated
+ * against -- auth_redirect() runs long before a cookie could come back from the
+ * browser, so the page could not otherwise render at all.
+ *
+ * Taking the values off the actions rather than generating a second pair
+ * matters: a nonce printed on the page is bound to the session token in the
+ * cookie that printed it, so the page and the requests it makes have to be
+ * carrying the same token or every nonce on the screen is refused.
+ *
+ * Nothing here sets SameSite, which leaves Chrome's default of Lax. Every
+ * request a shot makes is to the same origin as the page, so Lax sends the
+ * cookie; and the cookies are not marked secure, because the harness is served
+ * over http and a secure cookie would simply be dropped.
+ *
+ * The alternative was writing Chrome's cookie jar before it starts, or driving
+ * it over the DevTools protocol to set cookies directly. Both mean knowing more
+ * about the browser than the harness should have to: the jar is an encrypted
+ * SQLite schema that moves between Chrome releases, and the protocol means
+ * giving up one-shot --screenshot rendering for a websocket client and a
+ * dependency to install. A Set-Cookie header is the browser's own documented
+ * way in and needs nothing.
+ *
+ * @param WP_User $user The user to be photographed as.
+ */
+function pc_shot_sign_in( WP_User $user ): void {
+	add_action(
+		'set_auth_cookie',
+		static function ( $cookie, $expire, $expiration, $user_id, $scheme ): void {
+			$_COOKIE[ 'secure_auth' === $scheme ? SECURE_AUTH_COOKIE : AUTH_COOKIE ] = $cookie;
+		},
+		10,
+		5
+	);
+
+	add_action(
+		'set_logged_in_cookie',
+		static function ( $cookie ): void {
+			$_COOKIE[ LOGGED_IN_COOKIE ] = $cookie;
+		}
+	);
+
+	// Not remembered, and not secure: a session cookie is right because each
+	// shot gets a fresh browser profile, and the secure flag is asked for
+	// explicitly rather than left to is_ssl() so that a shop whose home option
+	// says https cannot end up sending a cookie the browser throws away.
+	wp_set_auth_cookie( $user->ID, false, false );
+}
 
 /**
  * Take the admin menu, the toolbar and the screen tabs off the picture.
@@ -153,7 +268,88 @@ function pc_shot_strip_furniture(): void {
 }
 
 /**
- * Open a tab, and draw the rule the cropper looks for.
+ * Count what the page fetches for itself, and remember anything that went wrong.
+ *
+ * A screen that draws its own content over admin-ajax, the REST API or the
+ * Store API is the one that photographs wrongly without looking wrong: the
+ * request is refused, the region either stays empty or grows an error banner,
+ * and the file saves at a plausible size. This is how the frame comes to know,
+ * so that it can refuse to be cropped.
+ *
+ * What it asserts is positive. Not "no error text on the page", which only ever
+ * catches the failures somebody had already thought of, but: every request this
+ * page made in order to draw itself finished, and answered. Requests to other
+ * origins are left out, because a page reaching a third party is not the page
+ * drawing itself -- and in a container with no route to one, every such request
+ * fails whether or not anything is wrong.
+ *
+ * $excuse is the shot list's list of requests that are known to fail and known
+ * not to change the screen; see the allow lines in scripts/screenshot.sh. A
+ * request matching one is not watched at all rather than watched and forgiven,
+ * because some of them retry for as long as the page is open and would
+ * otherwise be in flight at the moment the subject is measured. Each one has to
+ * match something: an excuse that no longer describes the page is a hole in
+ * this check nobody knows is there, so the rule comes out stale and the run
+ * stops.
+ *
+ * @param string[] $excuse URL fragments this shot has been told to ignore.
+ */
+function pc_shot_print_watcher( array $excuse = array() ): void {
+	printf(
+		'<script id="pc-shot-watch">(function(){
+		var excuse=%1$s, used={};
+		var w={inflight:0,asked:0,failed:[],excuse:excuse,used:used};
+		window.pcShotWatch=w;
+		function watch(u){
+			var full;
+			try{ full=new URL(u,location.href); }catch(e){ return false; }
+			if(full.origin!==location.origin){ return false; }
+			for(var i=0;i<excuse.length;i++){
+				if(u.indexOf(excuse[i])>=0||full.href.indexOf(excuse[i])>=0){
+					used[excuse[i]]=(used[excuse[i]]||0)+1;
+					return false;
+				}
+			}
+			return true;
+		}
+		function bad(m){ if(w.failed.indexOf(m)<0){ w.failed.push(m); } }
+		var fetched=window.fetch;
+		if(fetched){
+			window.fetch=function(input){
+				var u=(typeof input==="string")?input:((input&&input.url)||"");
+				if(!watch(u)){ return fetched.apply(this,arguments); }
+				w.inflight++; w.asked++;
+				return fetched.apply(this,arguments).then(function(r){
+					w.inflight--;
+					if(!r.ok){ bad("HTTP "+r.status+" from "+u); }
+					return r;
+				},function(e){ w.inflight--; bad("no answer from "+u); throw e; });
+			};
+		}
+		var open=XMLHttpRequest.prototype.open, send=XMLHttpRequest.prototype.send;
+		XMLHttpRequest.prototype.open=function(m,u){ this.pcShotUrl=u; return open.apply(this,arguments); };
+		XMLHttpRequest.prototype.send=function(){
+			var x=this, u=x.pcShotUrl||"";
+			if(!watch(u)){ return send.apply(this,arguments); }
+			w.inflight++; w.asked++;
+			var counted=false;
+			function settle(){ if(counted){ return false; } counted=true; w.inflight--; return true; }
+			x.addEventListener("load",function(){
+				if(!settle()){ return; }
+				if(x.status<200||x.status>=300){ bad("HTTP "+x.status+" from "+u); }
+			});
+			x.addEventListener("error",function(){ if(settle()){ bad("no answer from "+u); } });
+			x.addEventListener("timeout",function(){ if(settle()){ bad("no answer in time from "+u); } });
+			x.addEventListener("abort",function(){ if(settle()){ bad("given up before it answered: "+u); } });
+			return send.apply(this,arguments);
+		};
+	})();</script>',
+		wp_json_encode( array_values( $excuse ) )
+	);
+}
+
+/**
+ * Open a tab, wait for the page to finish, and draw the rule the cropper reads.
  *
  * pc_click exists because a tabbed metabox opens on whichever tab its own
  * script picked and a still photograph cannot click. Firing the real click
@@ -165,49 +361,47 @@ function pc_shot_strip_furniture(): void {
  * error only shows once the set is seen side by side. The page marks its own
  * subject instead, so the numbers come out of the browser's layout.
  *
- * The rule is drawn once the document has stopped changing, and that used to be
- * a flat wait of a third of a second. It is not long enough for anything
- * WooCommerce drives with jQuery: a variable product's form runs on
- * wc_variation_form, which can fire after load, and it empties the image column
- * before refilling it. A shot landing inside that gap photographed a product
- * page with no photograph on it -- once in two runs, with nothing failing, so
- * the set came back one picture different and byte-for-byte comparison was the
- * only thing that noticed.
+ * Nothing here is timed, because no flat number is right: the answer belongs to
+ * whatever scripts the page happens to run. A third of a second was not enough
+ * for anything WooCommerce drives with jQuery -- a variable product's form runs
+ * on wc_variation_form, which can fire after load and empties the image column
+ * before refilling it, so a shot landing inside that gap photographed a product
+ * page with no photograph on it, once in two runs, with nothing failing.
  *
- * No flat number is right, because the answer belongs to whatever scripts the
- * page happens to run. So nothing is timed: the shot waits for a quarter-second
- * in which the DOM was not touched at all, and gives up waiting after six
- * seconds so a page with a carousel or a clock on it still gets photographed.
+ * So the rule waits for three things at once before it is drawn: a
+ * quarter-second in which the DOM was not touched, nothing left in flight, and a
+ * subject that measures the same twice running. The last two are what the
+ * too-tall crop needed. A basket drawn by the Store API was measured while its
+ * fetch was still out, then grew an error banner above the columns -- the rule
+ * stayed where it was put and the subject moved down behind it, so the crop came
+ * out the banner's height too high, saved, and looked like a screenshot.
  *
- * @param string $click    Selector to click first, or ''.
- * @param string $frame    Selector list whose union is the subject, or ''.
- * @param int    $pad      Pixels of page to keep around the subject.
+ * The verdict is the colour of the rule, and the watch carries on after the rule
+ * is drawn: Chrome takes the picture when its virtual time budget runs out, not
+ * when we are ready, so a request that fails afterwards, or a subject that moves
+ * afterwards, would otherwise be in the photograph and in nothing else. While
+ * there is patience left a subject that has moved is simply measured again; the
+ * refusal is for one that is still moving when the patience runs out.
+ *
+ * @param string $click Selector to click first, or ''.
+ * @param string $frame Selector list whose union is the subject, or ''.
+ * @param int    $pad   Pixels of page to keep around the subject.
  */
 function pc_shot_print_script( string $click, string $frame, int $pad ): void {
 	printf(
 		'<script>window.addEventListener("load",function(){
-			var click=%1$s, frame=%2$s, pad=%3$d;
+			var click=%1$s, frame=%2$s, pad=%3$d, rule=%4$s;
 			if(click){var c=document.querySelector(click); if(c){c.click();}}
 			if(!frame){return;}
-			var done=false, timer=null, observer=null;
-			function whenQuiet(){
-				if(timer){clearTimeout(timer);}
-				timer=setTimeout(draw,250);
-			}
-			setTimeout(draw,6000);
+			var w=window.pcShotWatch||{inflight:0,failed:[]};
+			var touched=Date.now(), watching=null, drawn=null, verdict=null, steady=0, last=null;
 			if(window.MutationObserver){
-				observer=new MutationObserver(whenQuiet);
-				observer.observe(document.documentElement,
+				watching=new MutationObserver(function(){ touched=Date.now(); });
+				watching.observe(document.documentElement,
 					{childList:true,subtree:true,attributes:true,characterData:true});
 			}
-			whenQuiet();
-			function draw(){
-				if(done){return;}
-				done=true;
-				if(timer){clearTimeout(timer);}
-				/* Disconnected before the rule is appended, or drawing it
-				   would look like one more mutation to wait for. */
-				if(observer){observer.disconnect();}
+			var giveUpAt=Date.now()+6000;
+			function measure(){
 				/* The union of every match, not the first: wp-admin lays its
 				   columns out with floats, so the wrapper that looks like the
 				   subject measures a few pixels high and a frame round it
@@ -215,31 +409,118 @@ function pc_shot_print_script( string $click, string $frame, int $pad ): void {
 				var all=[].slice.call(document.querySelectorAll(frame)).map(function(n){
 					return n.getBoundingClientRect();
 				}).filter(function(b){ return b.width>1 && b.height>1; });
-				if(!all.length){return;}
-				var left=Math.min.apply(null, all.map(function(b){return b.left;}));
-				var top=Math.min.apply(null, all.map(function(b){return b.top;}));
-				var right=Math.max.apply(null, all.map(function(b){return b.right;}));
-				var bottom=Math.max.apply(null, all.map(function(b){return b.bottom;}));
+				if(!all.length){ return null; }
+				return {
+					left:Math.min.apply(null,all.map(function(b){return b.left;}))+window.scrollX,
+					top:Math.min.apply(null,all.map(function(b){return b.top;}))+window.scrollY,
+					right:Math.max.apply(null,all.map(function(b){return b.right;}))+window.scrollX,
+					bottom:Math.max.apply(null,all.map(function(b){return b.bottom;}))+window.scrollY
+				};
+			}
+			function put(a,b){
+				return a&&b&&Math.abs(a.left-b.left)<1&&Math.abs(a.top-b.top)<1
+					&&Math.abs(a.right-b.right)<1&&Math.abs(a.bottom-b.bottom)<1;
+			}
+			function unused(){
+				return (w.excuse||[]).filter(function(e){ return !(w.used||{})[e]; });
+			}
+			function whyNow(){
+				if(w.failed.length){ return "failed"; }
+				if(w.inflight>0){ return "pending"; }
+				return unused().length?"stale":"ok";
+			}
+			function why(){
+				return steady>=2?whyNow():"moved";
+			}
+			function say(v){
+				var lines=w.failed.slice(0);
+				if("pending"===v){ lines.push(w.inflight+" request(s) had not answered when the picture was taken"); }
+				if("moved"===v){ lines.push("the subject was still moving when the picture was taken"); }
+				if("stale"===v){ lines.push("nothing on this page asked for: "+unused().join(", ")); }
+				var note=document.getElementById("pc-shot-why");
+				if(!note){
+					note=document.createElement("div");
+					note.id="pc-shot-why";
+					note.style.cssText="position:fixed;z-index:2147483647;left:0;top:0;max-width:100%%;"
+						+"background:#111;color:#fff;font:12px/1.5 monospace;padding:6px 10px;white-space:pre-wrap;";
+					document.body.appendChild(note);
+				}
+				note.textContent=v+"\\n"+lines.join("\\n");
+			}
+			function draw(box,v){
 				/* The rule is drawn inside the frame rather than round it, and
 				   the frame is clamped to the page. A subject flush against the
 				   top of the document has no room for a rule above it, and an
 				   outside rule there is simply not photographed -- which the
 				   cropper cannot tell from a frame that was never drawn. */
-				var L=Math.max(0, left+window.scrollX-pad);
-				var T=Math.max(0, top+window.scrollY-pad);
-				var d=document.createElement("div");
-				d.id="pc-shot-frame";
-				d.style.cssText="position:absolute;z-index:2147483647;pointer-events:none;"
+				var L=Math.max(0,box.left-pad), T=Math.max(0,box.top-pad);
+				var d=document.getElementById("pc-shot-frame");
+				if(!d){
+					d=document.createElement("div");
+					d.id="pc-shot-frame";
+					document.body.appendChild(d);
+				}
+				d.style.cssText="position:absolute;z-index:2147483646;pointer-events:none;"
 					+"box-sizing:border-box;background:transparent;"
-					+"box-shadow:inset 0 0 0 2px #ff00ff;"
+					+"box-shadow:inset 0 0 0 2px "+rule[v]+";"
 					+"left:"+L+"px;top:"+T+"px;"
-					+"width:"+(right+window.scrollX+pad-L)+"px;"
-					+"height:"+(bottom+window.scrollY+pad-T)+"px;";
-				document.body.appendChild(d);
+					+"width:"+(box.right+pad-L)+"px;"
+					+"height:"+(box.bottom+pad-T)+"px;";
+				if("ok"===v){
+					/* A verdict can improve: a subject re-measured after it
+					   moved may have nothing wrong with it by then, and the
+					   reasons printed for the last one are not about this one. */
+					var old=document.getElementById("pc-shot-why");
+					if(old){ old.parentNode.removeChild(old); }
+					return;
+				}
+				say(v);
 			}
+			setInterval(function(){
+				var now=Date.now(), here=measure();
+				if(!drawn){
+					steady=put(here,last)?steady+1:0;
+					last=here;
+					var ready=here&&steady>=2&&w.inflight===0&&(now-touched)>=250;
+					if(!ready&&now<giveUpAt){ return; }
+					/* Nothing is drawn when the selector matched nothing: a
+					   missing rule is the cropper telling you about the
+					   selector, and a rule round nowhere would not be. */
+					if(!here){ return; }
+					verdict=why();
+					drawn=here;
+					/* Disconnected before the rule goes in, or drawing it looks
+					   like one more mutation to wait for. */
+					if(watching){ watching.disconnect(); watching=null; }
+					draw(drawn,verdict);
+					return;
+				}
+				if(w.failed.length){
+					if("failed"!==verdict){ verdict="failed"; draw(drawn,verdict); }
+					return;
+				}
+				if(put(here,drawn)){ return; }
+				/* The subject moved after it was measured, and while there is
+				   patience left the answer is to measure it again rather than to
+				   refuse: the classic editor sets its own height a good half
+				   second after the page has gone quiet and every request it made
+				   has answered, which moves the panel below it twenty pixels up
+				   the page. Nothing failed and nothing is still loading, so
+				   refusing that would make an ordinary product screen
+				   unphotographable. Only a subject still moving when the
+				   patience runs out is refused. */
+				if(here&&now<giveUpAt){
+					drawn=here;
+					verdict=whyNow();
+					draw(drawn,verdict);
+					return;
+				}
+				if("moved"!==verdict){ verdict="moved"; draw(drawn,verdict); }
+			},150);
 		});</script>',
 		wp_json_encode( $click ),
 		wp_json_encode( $frame ),
-		$pad
+		$pad,
+		wp_json_encode( PC_SHOT_RULE )
 	);
 }

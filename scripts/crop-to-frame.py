@@ -3,31 +3,112 @@
 
     crop-to-frame.py <raw.png> <out.png> [margin]
 
-The page marks its subject with an inset magenta rule (see
+The page marks its subject with an inset rule (see
 tests/helpers/screenshot-mode.php). Cropping to that rule rather than to
 numbers read off a preview is what makes a set repeatable: a screen that grows
 a field still comes out framed correctly, and nobody has to re-measure.
+
+The rule's colour is also the page's verdict on itself, because a render is one
+way traffic and there is nowhere else to put it. Magenta means the page finished
+drawing itself and the crop may be taken. The other four each stop the run:
+nothing is saved, and the reason is named. Keep this table in step with
+PC_SHOT_RULE in the shim.
+
+A rule that is not closed on all four sides stops the run as well. Chrome
+photographs the viewport, so a subject taller or wider than it leaves a rule
+with an edge missing -- and the crop then comes out of whatever part of the rule
+was on screen, at a plausible size, looking exactly like a screenshot of
+something a little smaller.
 """
 import sys
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 SCALE = 2
 RULE = 2 * SCALE  # the rule's own width, in device pixels
 
+# Each verdict is the colour its rule is drawn in, said as which channels are
+# up and which are down: nothing in wp-admin, a block theme or WooCommerce
+# draws any of the five, and testing them as extremes rather than as exact
+# values allows for the antialiasing on a fractional edge.
+VERDICTS = (
+    ("ok", "high", "low", "high"),
+    ("failed", "low", "high", "low"),
+    ("pending", "low", "high", "high"),
+    ("moved", "high", "high", "low"),
+    ("stale", "high", "low", "low"),
+)
 
-def frame_box(im):
-    px = im.load()
-    xs, ys = [], []
-    for y in range(im.height):
-        for x in range(im.width):
-            r, g, b = px[x, y][:3]
-            if r > 220 and g < 70 and b > 220:
-                xs.append(x)
-                ys.append(y)
-    if not xs:
-        return None
-    return min(xs), min(ys), max(xs) + 1, max(ys) + 1
+REFUSED = {
+    "failed": (
+        "the page did not finish drawing itself: a request it made for its own "
+        "content came back an error. The reason is written across the top of the "
+        "raw render."
+    ),
+    "pending": (
+        "the page was still loading its own content when the picture was taken, "
+        "so the crop would be of a screen part way through arriving."
+    ),
+    "moved": (
+        "the subject moved after it had been measured, so the rule is no longer "
+        "round it and the crop would be in the wrong place."
+    ),
+    "stale": (
+        "an allow line in the shot list named a request this page never makes, so "
+        "the check it switches off is switched off for nothing. The fragment is "
+        "written across the top of the raw render: delete that line."
+    ),
+}
+
+# A rule is at least four pixels along each of four sides, so anything smaller
+# than this is page content that happens to be one of the four colours.
+LEAST_RULE = 200
+
+# An edge is drawn or it is not. The slack is for the antialiasing on a rule
+# whose box came out of getBoundingClientRect() on a fractional boundary.
+EDGE_DRAWN = 0.85
+
+
+def masks(im):
+    """One black-and-white mask per reserved colour, with its box and its size."""
+    channels = im.split()[:3]
+    up = [ch.point(lambda v: 255 if v > 220 else 0) for ch in channels]
+    down = [ch.point(lambda v: 255 if v < 70 else 0) for ch in channels]
+
+    found = {}
+    for name, *wanted in VERDICTS:
+        mask = None
+        for i, level in enumerate(wanted):
+            this = up[i] if level == "high" else down[i]
+            mask = this if mask is None else ImageChops.multiply(mask, this)
+        box = mask.getbbox()
+        if box is None:
+            continue
+        size = mask.histogram()[255]
+        if size >= LEAST_RULE:
+            found[name] = (mask, box, size)
+    return found
+
+
+def open_edges(mask, box):
+    """Which sides of the rule were not photographed, if any."""
+    left, top, right, bottom = box
+    px = mask.load()
+    band = RULE // 2  # the middle of the rule's own width
+
+    def drawn(points):
+        points = [p for p in points if 0 <= p[0] < mask.width and 0 <= p[1] < mask.height]
+        if not points:
+            return 0.0
+        return sum(1 for x, y in points if px[x, y]) / len(points)
+
+    sides = {
+        "top": [(x, top + band) for x in range(left, right, 3)],
+        "bottom": [(x, bottom - 1 - band) for x in range(left, right, 3)],
+        "left": [(left + band, y) for y in range(top, bottom, 3)],
+        "right": [(right - 1 - band, y) for y in range(top, bottom, 3)],
+    }
+    return [side for side, points in sides.items() if drawn(points) < EDGE_DRAWN]
 
 
 def page_colour(im, box):
@@ -44,12 +125,33 @@ def main() -> int:
     margin = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 
     im = Image.open(raw).convert("RGB")
-    box = frame_box(im)
+    found = masks(im)
 
-    if box is None:
-        # Almost always a selector that matched nothing, or a subject taller
-        # than the viewport so that no complete rule was ever on screen.
+    if not found:
+        # Almost always a selector that matched nothing, or a subject below the
+        # fold so that no rule was on screen at all.
         print(f"no frame found in {raw}: check the selector and the height", file=sys.stderr)
+        return 1
+
+    # The rule is whichever candidate closes on all four sides. Anything else of
+    # one of these colours is page content, and page content is not a rectangle
+    # drawn round the subject.
+    closed = [name for name, *_ in VERDICTS if name in found and not open_edges(*found[name][:2])]
+    name = closed[0] if closed else max(found, key=lambda n: found[n][2])
+    mask, box, _ = found[name]
+
+    if name != "ok":
+        print(f"{raw} was refused: {REFUSED[name]}", file=sys.stderr)
+        return 1
+
+    missing = open_edges(mask, box)
+    if missing:
+        print(
+            f"the rule in {raw} has no {' or '.join(missing)} edge, so the subject is "
+            "bigger than the viewport it was rendered in: raise the width or the "
+            "height for this shot.",
+            file=sys.stderr,
+        )
         return 1
 
     left, top, right, bottom = box
