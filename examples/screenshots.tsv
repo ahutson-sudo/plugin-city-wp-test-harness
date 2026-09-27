@@ -1,0 +1,15 @@
+# Example shot list: PluginCity Advanced Pre-Orders for WooCommerce.
+#
+# One line per readme caption, in the readme's order. Copy this into a plugin
+# repo, point the paths at that plugin's screens, and run
+#   scripts/screenshot.sh path/to/screenshots.tsv dist/screenshots
+# against a harness that has already been seeded.
+#
+# The ids in these paths come out of the seed script, which is why the two
+# files belong together and belong to the plugin rather than to the harness.
+#
+# name	path	frame	click	pad	margin	width	height
+screenshot-1	/product/the-salt-path-home/	header.wp-block-template-part, .wp-block-columns.alignwide	-	0	0	1280	1200
+screenshot-2	/wp-admin/post.php?post=11&action=edit	#woocommerce-product-data	.apofw_preorder_tab a	0	18	1160	1400
+screenshot-3	/wp-admin/admin.php?page=apofw-settings	.apofw-settings__header, .apofw-settings-layout, .apofw-settings__footer	-	24	0	1400	1400
+screenshot-4	/wp-admin/admin.php?page=wc-orders&action=edit&id=31	#woocommerce-order-data, #woocommerce-order-items, #postbox-container-1	-	0	18	1220	1800
