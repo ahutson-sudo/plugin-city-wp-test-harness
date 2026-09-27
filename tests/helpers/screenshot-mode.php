@@ -178,6 +178,24 @@ add_action(
 		$posted = isset( $_SERVER['REQUEST_METHOD'] )
 			&& 'POST' === strtoupper( sanitize_text_field( wp_unslash( (string) $_SERVER['REQUEST_METHOD'] ) ) );
 
+		// Arriving as the answer to a POST is not the same as the POST having
+		// been accepted, and the difference is invisible: a screen whose nonce
+		// was refused draws exactly as it draws when nothing has been asked. So
+		// the one thing WordPress says out loud when it turns a submission away
+		// is listened for. It fires only for a nonce that was sent and did not
+		// verify, which on a GET render is somebody's speculative check and on a
+		// POST is the submission this shot exists to photograph being thrown out.
+		if ( $posted ) {
+			add_action(
+				'wp_verify_nonce_failed',
+				static function ( $nonce, $action ): void {
+					pc_shot_refused_nonces( is_scalar( $action ) ? (string) $action : '?' );
+				},
+				10,
+				2
+			);
+		}
+
 		$script = static function () use ( $click, $frame, $pad, $posted ): void {
 			pc_shot_print_script( $click, $frame, $pad, $posted );
 		};
@@ -373,6 +391,27 @@ function pc_shot_print_watcher( array $excuse = array() ): void {
 }
 
 /**
+ * The nonce actions this request turned away, in the order they were refused.
+ *
+ * A store rather than a variable because the refusals happen while WordPress is
+ * deciding what to do with the request and are read much later, in the footer,
+ * by the script that draws the verdict.
+ *
+ * @param string|null $action An action to record, or null to read the list.
+ *
+ * @return array<int,string>
+ */
+function pc_shot_refused_nonces( ?string $action = null ): array {
+	static $seen = array();
+
+	if ( null !== $action ) {
+		$seen[ $action ] = true;
+	}
+
+	return array_keys( $seen );
+}
+
+/**
  * Read pc_click as the sequence of things to do before the picture is taken.
  *
  * One step per '|', and a step written 'selector ::= value' types the value into
@@ -454,6 +493,17 @@ function pc_shot_steps( string $click ): array {
  * sequence ran, that it ran to the end, and that it itself arrived as the answer
  * to a POST. Everything that document then loads for itself is watched as usual.
  *
+ * Arriving as the answer to a POST is still not the same as the POST having been
+ * accepted, which is the other half of it and the half that has already cost a
+ * picture: a screen whose nonce was refused draws exactly as it draws when
+ * nothing has been asked, at the right size, with no error anywhere. So a nonce
+ * turned away on a POST is a refusal too -- see pc_shot_refused_nonces().
+ *
+ * Neither of those can tell that the answer a screen gave is the answer the shot
+ * was after, and nothing here can. What does is the frame: a shot whose subject
+ * includes something that only exists once the screen has answered is checked by
+ * the selector matching, which is already a refusal when it does not.
+ *
  * pc_frame exists because the crop is the part of this job most easily got
  * wrong by hand: a box read off a preview is out by a few pixels, and the
  * error only shows once the set is seen side by side. The page marks its own
@@ -489,7 +539,7 @@ function pc_shot_steps( string $click ): array {
 function pc_shot_print_script( string $click, string $frame, int $pad, bool $posted = false ): void {
 	printf(
 		'<script>window.addEventListener("load",function(){
-			var steps=%1$s, frame=%2$s, pad=%3$d, rule=%4$s, posted=%5$s, key=%6$s;
+			var steps=%1$s, frame=%2$s, pad=%3$d, rule=%4$s, posted=%5$s, key=%6$s, refused=%7$s;
 			var report="";
 			/* Where the sequence got to, kept across the navigation the last step
 			   causes. A fresh browser profile per shot means nothing here is ever
@@ -554,6 +604,9 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 				}else if(!posted){
 					report="the sequence finished and the page changed, but what came back was not the answer to a form: nothing was asked";
 				}
+			}
+			if(!report&&refused.length){
+				report="the form this page answers was turned away: the nonce for "+refused.join(", ")+" did not verify, so the screen has drawn as though nothing had been asked";
 			}
 			if(!frame){return;}
 			/* An animation that never ends has no right moment in it. A progress
@@ -726,6 +779,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 		$pad,
 		wp_json_encode( PC_SHOT_RULE ),
 		$posted ? 'true' : 'false',
-		wp_json_encode( $click )
+		wp_json_encode( $click ),
+		wp_json_encode( pc_shot_refused_nonces() )
 	);
 }

@@ -416,7 +416,7 @@ One line per shot, tab separated. Blank lines and `#` comments are ignored.
 | `name` | Output file stem, so `screenshot-1` writes `screenshot-1.png` |
 | `path` | Site-relative, e.g. `/product/a-book/` or `/wp-admin/admin.php?page=my-settings`. May carry `{{kind.key}}` placeholders, and may be prefixed with who is looking |
 | `frame` | CSS selector list. The **union** of every match is what gets cropped to |
-| `click` | Selector clicked before the frame is measured, or `-` |
+| `click` | What to do before the frame is measured, or `-`. One step, or several separated by `\|`. A step is a selector to click; a step written `selector ::= value` types the value into that field instead |
 | `pad` | Page pixels kept around the subject |
 | `margin` | Flat pixels of page colour added after cropping |
 | `width` `height` | Viewport in CSS pixels. The height only has to be enough to hold the subject, since the crop decides the result |
@@ -472,6 +472,67 @@ the administrator is rendered twice in the warm-up pass described below, once as
 the administrator so that the site has finished writing whatever a first
 privileged view writes, and once as the person who will be photographed.
 
+### Screens that have to be asked before they have anything on them
+
+Some screens cannot be reached by asking for a URL. A panel that answers a form
+has nothing on it until the form has been filled in and submitted, and a picture
+of the empty one is a picture of a feature not working. So the `click` column
+takes a sequence:
+
+```
+name	/wp-admin/admin.php?page=my-settings	#answer	[data-section="try-it"]|#subtotal ::= 78.50|#items ::= 6|.card button[type="submit"]	…
+```
+
+Steps are separated by `|` and taken in order: click the nav entry, fill three
+fields, press the button. `::=` splits a step into a selector and the value to
+type; everything after the first `::=` is the value, so a value may contain the
+token. A field is filled the way a person fills it — the value is set and then
+`input` and `change` are dispatched — because a screen that redraws itself when a
+field changes has to be given the chance to.
+
+Both tokens came from the first shot list that needed a sequence, and they were
+kept for opposite reasons. `::=` cannot be mistaken for CSS: a selector may
+contain colons, but nothing in the language puts an equals sign after a
+pseudo-element. `|` can be mistaken for CSS, in `[lang|="en"]`, and a value a
+shop types could contain one too. There is no separator that could not, in a
+column that carries arbitrary strings inside a file whose columns are already
+separated by tabs — so the collision is made loud rather than legislated away. A
+selector cut in half either stops being a selector the browser will parse or
+stops matching anything, and both refuse the shot and name the step.
+
+**A step that did not happen refuses the shot.** Not a warning, and not carrying
+on to the next one: a form filled in with two of its three fields photographs
+exactly as well as one filled in with three, and so does a panel that was never
+asked anything. So the run stops, and says which step and why:
+
+```
+step 5 of 8 did not happen: "#tester-class" would not take "no-such-class" and reads ""
+step 3 of 8 did not happen: the browser does not understand "#tester-weight[" as a selector
+step 4 of 8 did not happen: nothing on this page matches "#tester-nothing"
+```
+
+The last of those three is the one worth knowing about. A menu quietly refuses a
+value it has no entry for and reads back empty, so a shot list naming a shipping
+class the shop has not got would otherwise photograph a form with one field
+blank — which is a wrong picture of a working feature.
+
+A sequence that ends by submitting a form is the case all of this was built for,
+and there are two things to get right in a shot list that does it.
+
+- **The form has to post to the URL it was drawn from.** Everything the shim
+  needs is on the query string, so a form whose `action` is empty — which is what
+  WordPress and WooCommerce write — comes back with the shot still in progress. A
+  form posting somewhere else arrives as a page the shim knows nothing about, and
+  the run fails for a missing frame.
+- **The `frame` should include something that only exists once the screen has
+  answered.** That is the only check that can tell the answer apart from the
+  absence of one, and it comes for free: a selector matching nothing already
+  fails the run.
+
+Only the last step may submit, and the sequence has to be the whole of what the
+shot does. Following a plain link is refused rather than supported — put its
+destination in `path` instead.
+
 ### Nothing is saved unless the page says it drew itself
 
 A screen that loads its own content — over admin-ajax, the REST API, WooCommerce's
@@ -494,8 +555,9 @@ table and is the only thing that reads it:
 | cyan | A request had not answered when the picture was taken |
 | yellow | The subject was still moving when the picture was taken |
 | red | An `allow` line in the shot list describes a request this page never makes |
+| blue | A step in the `click` column did not happen, or the form it submitted was turned away |
 
-Four of the five **stop the run**, name the reason, and save nothing. The render
+Five of the six **stop the run**, name the reason, and save nothing. The render
 that was refused is kept beside the set as `<name>.rejected.png`, at twice final
 size, with the reason written across the top of it — and last run's picture is
 deleted before this run's is attempted, because a refusal that left the old file in
@@ -527,6 +589,25 @@ and the driver kills the browser with no file written, and the run says `FAILED 
 render` and stops. So a slow screen is photographed correctly and a hung one is
 refused; the cyan verdict is the backstop for the day Chrome's clock behaves
 differently.
+
+Submitting a form is the one thing the count cannot see, and it is worth being
+exact about why. What is counted is what a page fetches *for itself*; a submission
+is a navigation, so the POST is not a request that document ever makes — it is the
+reason the next document exists. Two things answer for it instead. The steps are
+remembered in `sessionStorage`, which is what survives a navigation in the same
+tab, so the page that comes back can tell that a sequence ran, that it ran to the
+end, and that it arrived as the answer to a POST rather than as an ordinary page
+load. And a nonce that a POST had turned away is a refusal in its own right,
+because a screen whose nonce was refused draws exactly as it draws when nothing
+has been asked: right size, no error, nothing in any log. That is not a
+hypothetical — it is how a picture of an unanswered panel came to be published
+once, and the cause was a session token that changed between the page being drawn
+and the form being posted.
+
+One consequence to know about, since it is a refusal you cannot argue with: a
+screen that checks two nonces in turn and accepts the second is refused, because
+the first was turned away. Nothing in this range does it on a form a capture
+submits, and the message names the action so at least the cause is not a mystery.
 
 #### Excusing one request, on one shot
 
@@ -709,6 +790,14 @@ when it is sent without that user's cookie. `$_COOKIE` is still filled, from the
 same values, because `auth_redirect()` runs long before a cookie could come back
 from the browser.
 
+It signs a browser in **once**, and not once per request, which is the same defect
+one turn further on. Every call mints a new session token, and every nonce is bound
+to the token in the cookie that printed it, so a browser handed a new session on
+every request has each form it submits checked against a token that did not exist
+when the form was drawn. Nothing says so. The POST is refused and the screen
+answering it draws as though nothing had been asked — which is why a refused nonce
+is now a refused shot.
+
 ### Two traps that look like broken code
 
 Both of these cost real time, neither logs anything, and both look like a fault
@@ -740,9 +829,11 @@ log-in, including the storefront as a named customer; a screen that draws itself
 over admin-ajax, the REST API or the Store API; the block editor, which is REST
 and nonces throughout; a WooCommerce transactional email, through WooCommerce's
 own preview on the email settings screen, which a seed can point at a real order
-with the `woocommerce_email_preview_dummy_order` filter; and the whole admin
-screen with its menu, its toolbar and the plugin's own notice, by putting
-`pc_chrome=on` in the shot's own path. What follows is what is left.
+with the `woocommerce_email_preview_dummy_order` filter; a panel that has nothing
+on it until a form has been filled in and submitted, which the `click` column
+does; and the whole admin screen with its menu, its toolbar and the plugin's own
+notice, by putting `pc_chrome=on` in the shot's own path. What follows is what is
+left.
 
 - **A hover or a focus state.** There is a `click` and there is nothing else: the
   render has no pointer and no keyboard, so `:hover` never matches. A tooltip, a
@@ -752,12 +843,18 @@ screen with its menu, its toolbar and the plugin's own notice, by putting
   date picker, the colour picker: those are painted outside the page and are not
   in a picture of the page at all. A drop-down built out of HTML is fine and opens
   with `click`.
-- **Anything that only exists in the answer to a form submission.** The driver
-  renders a URL, so a screen reachable only by pressing a button is out of reach:
-  the wrong-password message on a log-in form, the result of a bulk action, an
-  order-received page reached by actually paying. Where the screen survives as a
-  URL of its own — `?settings-updated=true` and its like — ask for that URL and it
-  photographs normally.
+- **A form's answer that arrives as a redirect rather than as a page.** A
+  sequence of steps can submit a form and photograph what comes back, but only
+  where the answer *is* the response: a screen that saves and then redirects gives
+  the browser a fresh page load, and nothing can tell that apart from a form that
+  was never submitted, so it is refused. Where the redirect lands on a URL of its
+  own — `?settings-updated=true` and its like — ask for that URL instead, and it
+  photographs normally. What stays genuinely out of reach is anything the answer
+  to a form cannot be reached without doing for real: an order-received page needs
+  a payment.
+- **Anything outside wp-admin and the theme.** `wp-login.php` and the like draw
+  their own pages and fire none of the hooks the frame is printed on, so the
+  wrong-password message on a log-in form is unreachable however it is asked for.
 - **Anything that appears on scroll.** Chrome photographs the viewport, so the
   render never scrolls: a sticky header in its stuck state, or a section that
   reveals itself part way down, is not reachable. Widen or heighten the viewport
