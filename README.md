@@ -272,7 +272,7 @@ wp_register_style( 'woocommerce_admin_styles', WC()->plugin_url() . '/assets/css
 
 Plugin::instance()->enqueue_admin_assets( 'woocommerce_page_my-settings' );
 
-assert_true( wp_style_is( 'woocommerce_admin_styles', 'enqueued' ) );
+PluginCity\Harness\assert_true( wp_style_is( 'woocommerce_admin_styles', 'enqueued' ), 'The picker is given its stylesheet' );
 ```
 
 Two things combine to produce that false negative, and neither shows up in a
@@ -293,9 +293,10 @@ this is a `wp eval-file` problem specifically.
 
 Worth spending the paragraph on because the failure points the wrong way. The
 test reads as "the plugin did not ask for the stylesheet", which is a real fault
-worth writing a test for — Free Shipping Bar shipped exactly that, a WooCommerce
-picker given its script and not its stylesheet — so the obvious next move is to
-go looking in the plugin for a bug that is not there.
+worth writing a test for — a borrowed picker given its script and not its
+stylesheet draws itself unstyled on top of the plain control it was meant to
+replace — so the obvious next move is to go looking in the plugin for a bug that
+is not there.
 
 ## Add another Plugin City plugin
 
