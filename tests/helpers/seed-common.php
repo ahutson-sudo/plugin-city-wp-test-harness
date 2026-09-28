@@ -204,11 +204,9 @@ function seed_tidy_the_front_of_the_site(): void {
  * to come first and the session has to be thrown away, which is what this does.
  *
  * The basket arrives **empty**, however full the one stored against that account
- * is. `WC_Cart_Session::init()` reads the stored basket on `wp_loaded`, and under
- * WP-CLI that fired long before a seed got a look in, so a cart built now never
- * gets the callback. Usually that is what a seed wants. When it is not -- a
- * second seed script adjusting a shop the first one already filled -- ask for it
- * outright:
+ * is, because it is emptied here in memory. Usually that is what a seed wants.
+ * When it is not -- a second seed script adjusting a shop the first one already
+ * filled -- ask for the stored one outright:
  *
  *     seed_start_a_cart_for( $customer_id );
  *     WC()->cart->get_cart_from_session();
@@ -223,11 +221,37 @@ function seed_tidy_the_front_of_the_site(): void {
 function seed_start_a_cart_for( int $user_id ): void {
 	wp_set_current_user( $user_id );
 
+	/*
+	 * The session and the customer are thrown away, because both answered for
+	 * whoever the process was before. The cart is deliberately **not**, and this
+	 * is the one line here worth reading twice.
+	 *
+	 * `WC_Cart_Session::init()` hooks `set_session()` on
+	 * `woocommerce_after_calculate_totals` when a cart is built, and nothing
+	 * unhooks it when that cart is discarded. So a second cart does not replace
+	 * the first one's callback, it joins it -- and the abandoned one still wraps
+	 * a cart with nothing in it. `set_session()` nulls
+	 * `chosen_shipping_methods`, `previous_shipping_methods` and
+	 * `shipping_method_counts` whenever the cart it holds has nothing shippable,
+	 * so the next `calculate_totals()` wipes the chosen delivery method no matter
+	 * which cart did the work.
+	 *
+	 * Measured, on one shop with one variable: discarding the cart leaves the
+	 * session with no chosen method at all after the totals; keeping it leaves
+	 * the pinned rate in place. A cart already exists by the time a WP-CLI script
+	 * runs, so the discard was never the harmless-looking half of this.
+	 */
 	WC()->session  = null;
-	WC()->cart     = null;
 	WC()->customer = null;
 
 	wc_load_cart();
+
+	// Whatever the process was holding belongs to the customer before this one.
+	// Cleared in memory rather than through empty_cart(), which would also delete
+	// the basket WooCommerce has stored against the account.
+	WC()->cart->set_cart_contents( array() );
+	WC()->cart->set_removed_cart_contents( array() );
+	WC()->cart->set_applied_coupons( array() );
 }
 
 /**
@@ -255,13 +279,16 @@ function seed_start_a_cart_for( int $user_id ): void {
  * What it picks is not the cheapest rate, which is the guess to get out of the
  * way first, because a shot that is wrong for this reason usually looks right and
  * the cheapest-rate guess is why. `wc_get_default_shipping_method_for_package()`
- * takes **the first rate in the package that is not a local pickup method** --
- * that is, the order the methods were added to the zone. So a seed that adds free
- * shipping before its flat rate gets free shipping in the picture whatever it
- * asked for, and gets it for the basket that qualifies and not for the one that
- * does not, which is indistinguishable from the seed having worked. Reorder the
- * two lines that build the zone and the same shot list charges postage under a
- * bar announcing free delivery.
+ * takes **the first rate the zone offers** -- that is, the order the methods were
+ * added to it. Collection is skipped in that walk only when the cart says it was
+ * built by a page WooCommerce recognises; a cart a seed built reports its context
+ * as `shortcode`, and on that branch the literal first rate is taken, collection
+ * included. Both are the zone's own order, so a seed that adds free shipping
+ * before its flat rate gets free shipping in the picture whatever it asked for,
+ * and gets it for the basket that qualifies and not for the one that does not,
+ * which is indistinguishable from the seed having worked. Reorder the two lines
+ * that build the zone and the same shot list charges postage under a bar
+ * announcing free delivery.
  *
  * It is also what makes such a shot reproduce. Left to WooCommerce the method
  * depends on the order the zone was built in, and a row written by an earlier run
@@ -282,19 +309,36 @@ function seed_start_a_cart_for( int $user_id ): void {
  * compares the leftover row with itself.
  *
  * One thing this cannot do for you, because by the time it runs the evidence is
- * gone: **pin the method after the last `calculate_totals()`, never before it.**
- * Totals do not leave a chosen method alone -- they ask
- * `wc_get_chosen_shipping_method_for_package()` for each package, whose job is to
- * second-guess a stored choice, and a session that has never served a page load
- * looks to it exactly like a shop that has changed under the customer. Measured
- * rather than assumed: a pin set before the totals is not merely replaced, it is
- * gone, and the session comes out of them with no stored choice at all. The
- * browser then picks the first rate in the zone.
+ * gone: **pin the method where the totals will agree with it.** Totals do not
+ * leave a chosen method alone -- they ask
+ * `wc_get_chosen_shipping_method_for_package()` for each package, which keeps a
+ * stored choice only when four things hold at once: something is stored, the rate
+ * is still on offer, `previous_shipping_methods` names the same rates the package
+ * now has, and `shipping_method_counts` agrees on how many. The last two are the
+ * ones a seed has to earn, because a session that has never served a page load
+ * has neither, and without them the choice reads as a shop that changed under the
+ * customer.
  *
- * Which leaves a session indistinguishable from one the seed never pinned, so
- * nothing can tell those two apart afterwards, this function included. It reports
- * the method the photograph is going to use and whether anything is holding it
- * there, which is the only honest thing available. Read that line.
+ * Two shapes earn it, and both are in use:
+ *
+ *   - Pin **after** the last `calculate_totals()`. Nothing asks again, so nothing
+ *     can disagree. This is the simplest to reason about.
+ *   - Pin after a `calculate_shipping()` and before the totals. That call is what
+ *     writes both bookkeeping keys from the rates as they now stand, so the
+ *     totals find a choice that matches and leave it alone. Measured on two
+ *     products' seeds: the pinned rate is still there afterwards, and it is the
+ *     rate the next process reads.
+ *
+ * What does not survive is a pin written into a session where no rates have been
+ * worked out at all. Nor does one written while a **discarded cart** is still
+ * hooked -- see seed_start_a_cart_for(), where that is explained, because it is
+ * the cart rather than the ordering that does the damage and it was mistaken for
+ * the ordering once already.
+ *
+ * A lost pin leaves a session indistinguishable from one the seed never pinned,
+ * so nothing can tell those two apart afterwards, this function included. It
+ * reports the method the photograph is going to use and whether anything is
+ * holding it there, which is the only honest thing available. Read that line.
  *
  * @param int $user_id The customer the storefront shots are taken as.
  */
@@ -310,24 +354,30 @@ function seed_hand_the_cart_to( int $user_id ): void {
 	/*
 	 * Whose session this is, as opposed to whose it is about to be filed under.
 	 * The answer was settled when the session object was built, by asking who was
-	 * signed in at that moment, and a mismatch here is one of exactly two
-	 * mistakes: the session was built before anybody signed in, so it belongs to a
-	 * guest; or it was built for an earlier customer and this is the second
-	 * customer to be handed a cart in the same process, in which case the row
-	 * about to be written holds the earlier customer's basket.
+	 * signed in at that moment.
 	 *
-	 * Neither can be repaired from here -- the cart has already been filled
-	 * against the wrong session -- so it is said rather than fixed.
+	 * A guest token is **not** a fault, and saying so was one. It is what
+	 * `wc_load_cart()` mints under WP-CLI whoever is signed in, so it is what a
+	 * seed with one customer in it has; the row this function then writes under
+	 * that customer's own id is the repair, and the guest row is simply never
+	 * read. Two working seeds were accused of the defect this check exists to
+	 * find, which is worse than not checking, because the next person fixes the
+	 * seed.
+	 *
+	 * A different *named* customer is a real fault: it means an earlier customer
+	 * was handed a cart in this same process and the row about to be written holds
+	 * their basket, not this one's. It cannot be repaired from here -- the cart has
+	 * already been filled against the wrong session -- so it is said rather than
+	 * fixed.
 	 */
 	$session_belongs_to = (string) WC()->session->get_customer_id();
 
-	if ( (string) $user_id !== $session_belongs_to ) {
+	if ( (string) $user_id !== $session_belongs_to && 0 !== strpos( $session_belongs_to, 't_' ) ) {
 		fwrite(
 			STDERR,
-			'The cart being filed under customer ' . $user_id . ' was built for '
-				. ( 0 === strpos( $session_belongs_to, 't_' ) ? 'a guest' : 'customer ' . $session_belongs_to )
-				. ", so its delivery method is not this customer's. Call seed_start_a_cart_for( "
-				. $user_id . " ) before filling the cart, not after.\n"
+			'The cart being filed under customer ' . $user_id . ' was built for customer '
+				. $session_belongs_to . ", so its delivery method is that customer's. Call "
+				. 'seed_start_a_cart_for( ' . $user_id . " ) before filling the cart, not after.\n"
 		);
 	}
 
@@ -429,7 +479,7 @@ function seed_settle_the_delivery_method(): void {
 			// Reachable, and the case a seed most needs telling about: a cart can
 			// come out of the totals with rates on offer and nothing stored at all,
 			// so the browser chooses on its first page load and the seed has no say.
-			$report[] = ( '' === $default ? 'nothing stored and nothing to choose' : $default . ', which nothing has stored -- the browser will choose it on the first page load, being the first rate in the zone that is not collection' );
+			$report[] = ( '' === $default ? 'nothing stored and nothing to choose' : $default . ', which nothing has stored -- the browser will choose it on the first page load, being the first rate the zone offers' );
 
 			continue;
 		}
@@ -443,7 +493,7 @@ function seed_settle_the_delivery_method(): void {
 		 * choice, which is the part worth knowing.
 		 */
 		$report[] = $stored === $default
-			? $stored . '. That is also the rate WooCommerce picks unasked -- the first in the zone that is not collection -- so this picture does not depend on any choice being stored, and it moves if the zone is reordered'
+			? $stored . '. That is also the rate WooCommerce picks unasked -- the first the zone offers -- so this picture does not depend on any choice being stored, and it moves if the zone is reordered'
 			: $stored . ', chosen over WooCommerce\'s own ' . ( '' === $default ? 'default' : $default );
 	}
 

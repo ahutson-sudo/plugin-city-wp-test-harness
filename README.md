@@ -971,9 +971,12 @@ nothing logged, and a subject that is simply absent.
 
 What it picks is **not the cheapest rate**, and that guess is worth getting out
 of the way because it is why this survives being looked at.
-`wc_get_default_shipping_method_for_package()` takes the first rate in the
-package that is not a local pickup method — which is the order the methods were
-added to the zone. A seed that adds free shipping before its flat rate therefore
+`wc_get_default_shipping_method_for_package()` takes the **first rate the zone
+offers** — which is the order the methods were added to it. Collection is skipped
+in that walk only when the cart says it was built by a page WooCommerce
+recognises; a cart a seed built reports its context as `shortcode`, and on that
+branch the literal first rate is taken, collection included. Both readings are
+the zone's own order, so a seed that adds free shipping before its flat rate
 gets free shipping in the picture whatever it asked for, *and* gets it for the
 basket that qualifies and not for the one that does not, which is
 indistinguishable from the seed having worked. Reorder the two lines that build
@@ -1017,10 +1020,11 @@ shop in a fresh container. Re-running a capture against the shop that is already
 there compares the leftover row with itself, and will report byte-for-byte
 agreement however wrong the subject of the picture is.
 
-#### Three rules for a seed that chooses a delivery method
+#### Four rules for a seed that chooses a delivery method
 
-Pinning a method turns out to need three things, none of which announces itself
-when it is missing. One is now done for you and two cannot be.
+Pinning a method turns out to need four things, none of which announces itself
+when it is missing. Two are now done for you inside the helpers; two are the
+seed's own and cannot be.
 
 **Start the cart as the customer, before filling it.** `seed_start_a_cart_for(
 $customer_id )` signs the customer in and throws the session away so WooCommerce
@@ -1034,18 +1038,37 @@ moment — signing in afterwards is too late and nothing says so.
 
 `seed_hand_the_cart_to()` checks this and names both customers if they disagree.
 It cannot repair it, because by then the cart has been filled against the wrong
-session.
+session. It says nothing about a **guest** session, because that is not the
+fault it looks like: under WP-CLI `wc_load_cart()` mints a guest token whoever is
+signed in, so a seed with one customer in it has one by definition, and writing
+the row under that customer's own id is the repair. Saying otherwise accused two
+working seeds of the defect, which is worse than not checking, because the next
+reader fixes the seed.
 
-**Pin after the last `calculate_totals()`, never before it.** Totals do not
-leave a chosen method alone: they ask
-`wc_get_chosen_shipping_method_for_package()` for each package, whose job is to
-second-guess a stored choice, and a session that has never served a page load
-looks to it exactly like a shop that has changed under the customer. Measured on
-WooCommerce 11.1.2 rather than assumed: a pin set before the totals is not
-merely replaced, it is **gone** — the session comes out of them with no stored
-choice at all, and the browser picks the first rate in the zone.
+**Do not discard the cart.** `seed_start_a_cart_for()` rebuilds the session and
+the customer and keeps the cart, and that is not tidiness. `WC_Cart_Session`
+hooks `set_session()` on `woocommerce_after_calculate_totals` when a cart is
+built and nothing unhooks it when that cart is thrown away, so a second cart
+joins the first rather than replacing it — and the abandoned one wraps a cart
+with nothing in it. `set_session()` nulls all three of the keys below whenever
+the cart it holds has nothing shippable, so the next `calculate_totals()` wipes
+the chosen method however carefully it was pinned. A cart already exists by the
+time a WP-CLI script runs, so this is not a corner case; it is what happens every
+time. Measured on WooCommerce 11.1.2, one shop, one variable: keeping the cart
+leaves the pinned rate in place, discarding it leaves no stored choice at all.
 
-That leaves a session indistinguishable from one the seed never pinned, so
+**Pin where the totals will agree with the pin.**
+`wc_get_chosen_shipping_method_for_package()` keeps a stored choice only when
+four things hold at once: something is stored, the rate is still on offer,
+`previous_shipping_methods` names the same rates the package now has, and
+`shipping_method_counts` agrees on how many. The last two are what a seed has to
+earn, because a session that has never served a page load has neither. Two shapes
+earn them and both are in use: pin **after** the last `calculate_totals()`, so
+nothing asks again; or pin after a `calculate_shipping()` and before the totals,
+because that call writes both keys from the rates as they now stand. What does
+not survive is a pin written into a session where no rates have been worked out.
+
+A lost pin leaves a session indistinguishable from one the seed never pinned, so
 nothing can tell the two apart afterwards and nothing tries:
 `seed_hand_the_cart_to()` prints the method the photograph is going to use and
 whether anything is holding it there. That line is the check, and it is worth
