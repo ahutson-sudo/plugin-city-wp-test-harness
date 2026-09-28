@@ -517,19 +517,19 @@ part of the frame is not on this page, so the crop would be narrower than the
 shot asked for: ".mypl-settings__heder" matches nothing on this page
 ```
 
-It used to be the *list* that had to match, which meant a frame of two selectors
-where one was a typo drew itself from the other and saved a picture simply
-narrower than the one asked for, with nothing said. That is the worst shape a
-fault can take here — a wrong picture at a plausible size — and it is why the
-rule is the strict one. If a frame really does mean "whichever of these the page
-has", say so in the selector with `:is(.new-card, .old-card)`, which is one
-selector and still has to match: a list is not a place to be vague by accident.
+The strict rule is worth the inconvenience because the alternative is silent: a
+frame of two selectors where one is a typo would draw itself from the other and
+save a picture simply narrower than the one asked for, which is the worst shape a
+fault can take here. An element that is present but measures a pixel or less
+counts as absent too, since it contributes nothing to the box either way.
 
-An element that is present but measures a pixel or less counts as absent, which
-is the same rule the union is built from, and is said differently so the two are
-not confused. Nothing warns you that a frame has quietly got *bigger*, though,
-so that is the maintenance surface left: compare a new capture against the
-committed one before believing it.
+Where a frame genuinely means "whichever of these the page has", say so in the
+selector — `:is(.new-card, .old-card)` is one selector, still has to match, and
+reads as a decision rather than as a list somebody got wrong.
+
+What none of this catches is a frame that has quietly got *bigger*, so that is
+the maintenance surface left: compare a new capture against the committed one
+before believing it.
 
 With `pad` at `0` the crop is flush to the subject less the two pixels the rule
 itself occupies, so a subject whose own border is part of the picture wants
@@ -618,8 +618,8 @@ and there are two things to get right in a shot list that does it.
 - **The form has to post to the URL it was drawn from.** Everything the shim
   needs is on the query string, so a form whose `action` is empty — which is what
   WordPress and WooCommerce write — comes back with the shot still in progress. A
-  form posting somewhere else arrives as a page the shim knows nothing about, and
-  the run fails for a missing frame.
+  form posting somewhere else arrives as a page the shim was never asked to mark,
+  so nothing draws a rule at all and the run stops for want of one.
 - **The frame should name something that only exists once the screen has
   answered.** Every selector in a frame has to match, so a frame that includes
   the answer is a check on the answer having arrived: an unanswered screen has
