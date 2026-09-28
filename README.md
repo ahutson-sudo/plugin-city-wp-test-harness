@@ -613,7 +613,7 @@ table and is the only thing that reads it:
 | Rule | Meaning |
 |---|---|
 | magenta | The page finished drawing itself. Crop it |
-| green | A request the page made for its own content came back an error |
+| green | Something the page needed did not arrive, or a warning would have been left out of the picture |
 | cyan | A request had not answered when the picture was taken |
 | yellow | The subject was still moving when the picture was taken |
 | red | An `allow` line in the shot list describes a request this page never makes |
@@ -635,6 +635,20 @@ and in a container with no route to one every such request fails whether or not
 anything is wrong. The cropper adds the one assertion the page cannot make about
 itself — that the rule closes on all four sides, so the subject was not bigger
 than the viewport it was rendered in.
+
+An `<img>` is counted too, and it has to be counted separately, because an image
+is neither of the two things a page fetches through script. Nothing wraps it: the
+browser goes and gets it, and a failure arrives as an `error` event on the element
+rather than as a rejected promise or a status code anything can read. So a shot
+whose subject *is* a photograph could fail with nothing to show for it, and one
+did — a product tile with a broken image and a cart badge that never drew, at
+exactly the right size, on one run in three. Two things answer for it now. Any
+same-origin element that fails to load is heard on a capturing `error` listener,
+which is the only way to hear one, since a resource error does not bubble; and an
+image that has simply not finished counts towards the same "not answered yet" as
+an outstanding request, so the picture waits for it rather than being taken past
+it. The first covers a stylesheet and a script as well, which is why the sentence
+the refusal prints names the URL rather than the kind of thing it was.
 
 The driver adds the half of that a browser cannot do. The warm-up pass fetches
 each page with `curl`, which is the one moment in a capture when something can
@@ -941,6 +955,81 @@ happen to cost, and a session row written by an earlier run is read in
 preference to anything this one did — so a set can come back byte for byte
 identical twice over and still be of a state no seed ever asked for.
 
+### A warning about the shop has to be in the picture
+
+Published sets in this range are cropped to the plugin's own screen, so the
+furniture goes before the shutter rather than being cut off after it: cropping a
+2x render leaves a visible half-pixel seam where a hidden element leaves none. The
+admin menu, the toolbar, the screen-options tabs, WordPress's "a new version is
+available" nag, WooCommerce's store alerts and its own page header are all removed
+that way, each one named by its own class.
+
+A notice cannot be. WordPress and WooCommerce write banners across the top of
+every admin screen, and the plugin being photographed writes its own warnings in
+the same markup, often to the same four hooks — `admin_notices`,
+`all_admin_notices`, `network_admin_notices`, `user_admin_notices`. The class is
+the same. The position is the same. Neither tells you whose voice it is.
+
+For a long time one CSS rule hid `.notice` outright, which is the tidiest possible
+way to get this wrong. A shop that the plugin was warning about — a setting that
+contradicted its own shipping zones, a rule naming a delivery method that had been
+deleted — photographed exactly like a shop with nothing to say. No gap, no error,
+nothing refused, and no way afterwards to tell that picture from one of a screen
+that had been quiet. A caption can then contradict its own subject for as long as
+anybody cares to look at it.
+
+What does tell the two apart is **where the callback was defined**. A notice
+registered by a file under `wp-admin/`, under `wp-includes/` or inside the
+`woocommerce` plugin folder is furniture. Anything else is the plugin under the
+camera. So the hooks are read at `admin_init` priority 99, every callback is
+sorted on that question, and the furniture is dropped.
+
+The rest are not reinstated, and that is deliberate: a banner put back at the top
+of the page would move every subject in every existing shot list down by its own
+height. They are run into an output buffer which is thrown away — and then the
+buffer is read. If what it held was dressed as a warning or an error, the shot is
+**refused**, and the sentence is printed across the top of the rejected render.
+
+Three things follow, and together they are the guarantee:
+
+- A warning the plugin draws **inside its own screen** appears in the picture,
+  because nothing hides it any more. If it falls outside the frame the shot is
+  refused rather than cropped past it, so it cannot be silently trimmed off.
+- A warning that arrives **on one of the four hooks** is not drawn, but is not
+  lost either: it refuses the shot and says what it said.
+- So a shop that is being warned about something cannot be photographed clean.
+  Either the warning is in the picture or there is no picture.
+
+What that does **not** cover, which is the part worth knowing before trusting it:
+
+- **Severity is read off classes it recognises** — `notice-warning`,
+  `notice-error`, `woocommerce-error`, WordPress's older `notice error` pair, and
+  the block editor's error and warning banners. A plugin that dresses a warning in
+  a class of its own is invisible to this, and will be drawn in the picture but
+  will not refuse a shot that leaves it out of frame.
+- **Information and success are still removed silently**, and on purpose.
+  "Settings saved." is on very nearly every admin screen a capture visits, and a
+  check that refused those is a check somebody switches off within the week. The
+  cost is real and it is accepted: an info notice that mattered goes unremarked.
+- **It cannot tell a warning about the shop from a warning about the plugin.** It
+  refuses either, which errs the safe way but means a message about something the
+  picture does not claim anything about can still stop a run. Read the sentence,
+  then either widen the frame or put the shop right.
+- **Provenance is a file path**, so the two ways to fool it are a plugin whose
+  notices are registered from code living inside the WooCommerce folder, and a
+  WordPress or WooCommerce notice registered later than `admin_init` 99. Neither
+  has been met; both would read as the opposite of what they are.
+- `pc_chrome=on` turns the whole furniture rule off, banners included. That is a
+  picture of the entire admin screen and a different job from a cropped one.
+
+Everything else this shim takes out of a subject is here, so the question has one
+place to be answered. Transitions are disabled, which lands an element on the
+style it was moving from; an animation that never ends is stopped, which lands one
+on the style it was drawn with; the admin bar is switched off; and WooCommerce's
+helper notices are suppressed by its own filter. Lazy loading is switched off too,
+but that is the opposite — it puts an image into the picture that would otherwise
+have arrived after it.
+
 ### What cannot be photographed
 
 Whoever writes the captions needs to know what this will not do, because a caption
@@ -954,9 +1043,9 @@ and nonces throughout; a WooCommerce transactional email, through WooCommerce's
 own preview on the email settings screen, which a seed can point at a real order
 with the `woocommerce_email_preview_dummy_order` filter; a panel that has nothing
 on it until a form has been filled in and submitted, which the `click` column
-does; and the whole admin screen with its menu, its toolbar and the plugin's own
-notice, by putting `pc_chrome=on` in the shot's own path. What follows is what is
-left.
+does; and the whole admin screen with its menu, its toolbar and the banners
+WordPress and WooCommerce write across the top of it, by putting `pc_chrome=on` in
+the shot's own path. What follows is what is left.
 
 - **A hover or a focus state.** There is a `click` and there is nothing else: the
   render has no pointer and no keyboard, so `:hover` never matches. A tooltip, a
