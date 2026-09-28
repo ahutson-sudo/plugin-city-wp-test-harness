@@ -349,6 +349,7 @@ Each row resets volumes so image and database state do not leak. Edit the TSV to
 | `error_log_contents()` / `clear_error_logs()` | Inspect PHP / WP debug logs |
 | `assert_true()` / `assert_same()` | Tiny assertions |
 | `seed_us_shop()` | A US shop in dollars, for screenshots — see below |
+| `seed_hand_the_cart_to()` | Give a seeded cart to the customer the shots are taken as |
 | `seed_record_id()` / `seed_finish()` | Record what a seed made, so a shot list need not know ids |
 
 Load them with:
@@ -798,10 +799,10 @@ when the form was drawn. Nothing says so. The POST is refused and the screen
 answering it draws as though nothing had been asked — which is why a refused nonce
 is now a refused shot.
 
-### Two traps that look like broken code
+### Three traps that look like broken code
 
-Both of these cost real time, neither logs anything, and both look like a fault
-in the plugin or a broken install.
+Each of these cost real time, none of them logs anything, and all three look
+like a fault in the plugin or a broken install.
 
 **A new store sits behind WooCommerce 11's Coming soon page.** Every storefront
 URL answers **HTTP 200** with a `wp-block-woocommerce-coming-soon` holding page.
@@ -830,6 +831,43 @@ an option at different versions:
 delete_transient( '_wc_activation_redirect' );
 delete_option( '_wc_activation_redirect' );
 ```
+
+**The cart a seed builds is not the cart the browser finds.** `wc_load_cart()`
+under WP-CLI mints a guest session token rather than reading the user the seed
+signed in as, so everything written through the session handler lands under a
+key that customer's browser will never look at.
+
+The basket survives anyway, and that is what makes this expensive rather than
+obvious: WooCommerce keeps a persistent copy against the account and restores it
+at sign-in, so the products, the quantities and the totals are all right in the
+picture. Only what lives *solely* in the session is gone. The chosen shipping
+method is the one that matters — WooCommerce picks again and takes the cheapest
+rate it can find, so a plugin that says something about delivery, or that treats
+one method differently from another, photographs a page that drew perfectly and
+has nothing on it. It is the same shape as the Coming soon page one step further
+in: a file of the expected size, nothing logged, and a subject that is simply
+absent.
+
+`seed_hand_the_cart_to( $customer_id )` writes the session row against the
+customer, after the cart is filled and the totals are worked out. A seed that
+does not use the helper needs the same write of its own:
+
+```php
+$wpdb->replace(
+    $wpdb->prefix . 'woocommerce_sessions',
+    array(
+        'session_key'    => (string) $customer_id,
+        'session_value'  => maybe_serialize( WC()->session->get_session_data() ),
+        'session_expiry' => time() + 2 * DAY_IN_SECONDS,
+    )
+);
+```
+
+It is also what makes such a shot reproduce, which is the part that hides the
+fault for longest. Left to WooCommerce the method depends on what the zones
+happen to cost, and a session row written by an earlier run is read in
+preference to anything this one did — so a set can come back byte for byte
+identical twice over and still be of a state no seed ever asked for.
 
 ### What cannot be photographed
 

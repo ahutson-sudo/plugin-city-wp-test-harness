@@ -180,6 +180,66 @@ function seed_tidy_the_front_of_the_site(): void {
 }
 
 /**
+ * Give the cart a seed has just built to the customer who will be photographed.
+ *
+ * Call this after the cart is filled and the totals are worked out, with the id
+ * of the customer whose storefront the shots are taken as.
+ *
+ *     wp_set_current_user( $customer_id );
+ *     wc_load_cart();
+ *     WC()->cart->add_to_cart( $product_id, 2 );
+ *     WC()->session->set( 'chosen_shipping_methods', array( 'flat_rate:3' ) );
+ *     WC()->cart->calculate_totals();
+ *     seed_hand_the_cart_to( $customer_id );
+ *
+ * Without it the browser finds a different cart from the one the seed built,
+ * and nothing anywhere says so. `wc_load_cart()` under WP-CLI mints a guest
+ * session token rather than reading the user the seed signed in as, so
+ * everything written through the session handler lands under a key that
+ * customer's browser will never look at.
+ *
+ * What makes that expensive rather than obvious is that the basket survives
+ * anyway: WooCommerce also keeps a persistent copy against the account and
+ * restores it at sign-in, so the products, the quantities and the totals are
+ * all correct in the picture. Only what lives *solely* in the session is gone,
+ * and the chosen shipping method is the one that matters -- WooCommerce picks
+ * again, takes the cheapest rate it can find, and a shot whose subject depends
+ * on the method photographs a page that drew perfectly and has nothing on it.
+ *
+ * It is also what makes such a shot reproduce. Left to WooCommerce the method
+ * depends on what the zones happen to cost, and a row written by an earlier run
+ * is read in preference to anything this one did, so a set can come back
+ * identical twice and still be of a state the seed never asked for.
+ *
+ * @param int $user_id The customer the storefront shots are taken as.
+ */
+function seed_hand_the_cart_to( int $user_id ): void {
+	global $wpdb;
+
+	if ( ! function_exists( 'WC' ) || ! WC()->session || ! WC()->cart ) {
+		fwrite( STDERR, "No cart to hand over: call wc_load_cart() and fill it first.\n" );
+
+		return;
+	}
+
+	WC()->cart->set_session();
+	WC()->session->save_data();
+
+	$written = $wpdb->replace(
+		$wpdb->prefix . 'woocommerce_sessions',
+		array(
+			'session_key'    => (string) $user_id,
+			'session_value'  => maybe_serialize( WC()->session->get_session_data() ),
+			'session_expiry' => time() + 2 * DAY_IN_SECONDS,
+		)
+	);
+
+	if ( false === $written ) {
+		fwrite( STDERR, 'Could not write the cart session for user ' . $user_id . "; the storefront will be photographed with whatever WooCommerce chooses.\n" );
+	}
+}
+
+/**
  * Remember that the seed made something, so a shot list need not know its id.
  *
  * A shot list carrying `post.php?post=11` is half of one artefact stored in
