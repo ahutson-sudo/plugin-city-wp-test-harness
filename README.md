@@ -161,8 +161,8 @@ reachable at all.
 
 - **A registry that cannot be reached, or that drops the connection.** This is
   the one worth covering: it fails in seconds, it usually succeeds on the next
-  attempt, and it has failed a real job in this range 3.5 seconds in, before any
-  code ran.
+  attempt, and it has already failed a real job 3.5 seconds in, before a line of
+  anybody's code had run.
 - **A registry that answers and refuses is tried once.** A tag or a repository
   that does not exist, or one that needs credentials this machine has not got, is
   the same answer every time, so three of them only print it later. Not every
@@ -197,7 +197,7 @@ all. It starts no containers, so it is safe to run beside a stack that is up.
 
 A registry failure that this does not cover can still arrive wearing something
 else's clothes. That is under
-[Two failures that are the machine and not the plugin](#two-failures-that-are-the-machine-and-not-the-plugin).
+[Two failures that are the harness and not the plugin](#two-failures-that-are-the-harness-and-not-the-plugin).
 
 ### Waiting for MariaDB
 
@@ -1085,6 +1085,67 @@ GitHub-hosted runners already have Docker, so plugin CI does not need Docker Des
 | `plugin-test-command` | empty | Override discovered plugin tests |
 
 The harness repository also runs `harness-self-test.yml` against `fixtures/sample-plugin` so the Action is verified independently of any real plugin.
+
+## Two failures that are the harness and not the plugin
+
+The traps that only bite a capture are under
+[Three traps that look like broken code](#three-traps-that-look-like-broken-code).
+These two bite any run, and both have already been read as a fault in the plugin.
+
+**A registry failure can still arrive wearing something else's clothes.** The
+retry above covers one thing: fetching an image the machine has not got, before
+anything starts. Four registry problems are still waiting on the other side of
+it, and none of them says "registry" anywhere in the failure.
+
+- **A pull quota is retried and still fails.** `toomanyrequests` cannot be told
+  apart from a transport failure here, so it takes all three attempts and is then
+  reported as three attempts. A retry cannot mint quota; what it buys is a
+  failure that names the registry rather than looking like a broken image.
+- **WordPress and WooCommerce do not come from the registry.** `install.sh`
+  downloads them from wordpress.org, inside the container, over a connection this
+  has nothing to do with, and nothing retries that. A drop shows up as an install
+  step failing — or, worse, as WooCommerce simply not being there afterwards, so
+  the plugin's own tests fail on everything WooCommerce would have provided. A
+  run whose plugin tests fail wholesale is worth checking against the install
+  output above them before it is read as a regression.
+- **An image the machine already has is never refreshed.** That is deliberate,
+  and it is what `up` did, but it means a stale layer under a moving tag such as
+  `mariadb:11` stays until somebody removes it. The symptom is a version that
+  does not match the one CI installed. `docker image rm` the tag and run again.
+- **Compose too old to answer `config --images`** leaves the fetch to `up`,
+  unretried, and says so in one line. The failure is then the original one: a
+  Compose error about a manifest, with nothing to say that no code has run.
+
+**Skipping the generic tests can change what the plugin tests find.**
+`PC_SKIP_GENERIC_TESTS=1` is the obvious economy when the plugin's own suite is
+the one being iterated on, and it is not free: the generic tests are the only
+part of a run that loads wp-admin over HTTP, and a plugin does work on an admin
+request that it does not do under WP-CLI.
+
+This range has one instance that costs an afternoon. A paid build starts its
+licence grace clock on the first admin or cron request, because a plugin replaced
+by upload never sees an activation hook and locking that shop out would be worse
+than trusting it. Under `wp eval-file` neither `is_admin()` nor `wp_doing_cron()`
+is true, so the clock is never started — while activation *has* seeded the
+plugin's own options, which the same code reads as evidence that the paid build
+has run here before. The grace therefore reads as spent, the licence reads as
+lapsed, and every assertion about a paid feature fails: twenty-three of them in
+one plugin, in a run where nothing was wrong.
+
+It appears and disappears on that one flag, on the same machine and the same
+commit, with the same plugin mounted:
+
+```bash
+PLUGIN_PATH=... PLUGIN_SLUG=... ./scripts/run-tests.sh
+# 121 passed, 0 failed
+
+PC_SKIP_GENERIC_TESTS=1 PLUGIN_PATH=... PLUGIN_SLUG=... ./scripts/run-tests.sh
+# 23 failed, from the first assertion about the licence onward
+```
+
+CI never sets the flag, which is why a failure like this reads as a local machine
+problem — the same commit is green on a runner and red here. It is not the
+machine. Before believing that a run differs from CI, run it the way CI does.
 
 ## Limitations
 
