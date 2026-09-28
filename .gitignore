@@ -6,8 +6,10 @@
 # including the refused render the driver keeps when a shot is rejected.
 dist/
 
-# Python leaves this beside crop-to-frame.py the first time the driver runs it,
-# so a clean checkout that has taken one picture already has a dirty tree.
+# Python's own cache. It caches a module it imports, not a file it is handed to
+# run, so nothing in scripts/ writes here in ordinary use: the directory turns
+# up when something loads one of them as a module instead, which is how a stray
+# .pyc reaches a commit without anybody having seen it arrive.
 __pycache__/
 
 .DS_Store
