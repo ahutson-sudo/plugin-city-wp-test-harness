@@ -42,9 +42,10 @@ VERDICTS = (
 
 REFUSED = {
     "failed": (
-        "the page did not finish drawing itself: a request it made for its own "
-        "content came back an error. The reason is written across the top of the "
-        "raw render."
+        "the page refused this render. Either it did not finish drawing itself -- "
+        "a request or an image it needed did not arrive -- or it would have been a "
+        "picture of a warned-about shop with the warning left out of it. Which, and "
+        "what the warning said, is written across the top of the raw render."
     ),
     "pending": (
         "the page was still loading its own content when the picture was taken, "

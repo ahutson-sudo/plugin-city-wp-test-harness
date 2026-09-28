@@ -58,6 +58,14 @@ const PC_SHOT_NOBODY = 'visitor';
  * reads it: magenta crops, and each of the other five stops the run and names a
  * different thing to go and fix. Keep the two lists in step.
  *
+ * There are six colours and no seventh available -- a channel is either up or
+ * down, because a mid value cannot be told from the antialiasing on a fractional
+ * edge, and of the eight corners white and black are drawn by everything. So
+ * green carries more than one reason: a request or an image that did not arrive,
+ * and a warning that would have been left out of the picture. The sentences
+ * printed across the top of the render are what tell them apart, which is the
+ * same way the other refusals are read.
+ *
  * All six are colours nothing in wp-admin, in a block theme or in WooCommerce
  * draws, which is the only property they need.
  */
@@ -104,16 +112,10 @@ add_action(
 		}
 
 		// WordPress and WooCommerce both draw banners across the top of every
-		// admin screen, over whatever is being photographed.
-		add_action(
-			'admin_init',
-			static function (): void {
-				foreach ( array( 'admin_notices', 'all_admin_notices', 'network_admin_notices', 'user_admin_notices' ) as $hook ) {
-					remove_all_actions( $hook );
-				}
-			},
-			99
-		);
+		// admin screen, over whatever is being photographed, and those have to
+		// go. The plugin being photographed writes to the same four hooks, and
+		// what it writes there is the shop's own voice.
+		add_action( 'admin_init', 'pc_shot_thin_the_notices', 99 );
 
 		add_filter( 'woocommerce_helper_suppress_admin_notices', '__return_true' );
 		add_filter( 'show_admin_bar', '__return_false' );
@@ -298,15 +300,216 @@ function pc_shot_strip_furniture(): void {
 		   alone on purpose: an element whose base style is invisible and whose
 		   keyframes bring it in would be photographed invisible. */
 		*, *::before, *::after { transition: none !important; }
+		/* Every one of these is furniture named by its own class, and the list
+		   used to carry .notice and .woocommerce-message as well. Those two are
+		   not furniture: .notice is the class a plugin prints its own warnings
+		   in, inside its own screen, and .woocommerce-message is the shop
+		   telling a customer what just went into their basket. Hiding them made
+		   a shop that was being warned about something photograph exactly like a
+		   shop with nothing to say -- no gap, no error, nothing refused, and
+		   indistinguishable afterwards from a screen that had been quiet.
+		   The banners that WordPress and WooCommerce write are taken off at the
+		   hook they are written on instead; see pc_shot_thin_the_notices(). */
 		#adminmenumain, #adminmenuback, #adminmenuwrap, #wpadminbar,
-		#wpfooter, #screen-meta, #screen-meta-links, .notice, .update-nag,
-		.woocommerce-layout__header, .woocommerce-store-alerts,
-		.woocommerce-message { display: none !important; }
+		#wpfooter, #screen-meta, #screen-meta-links, .update-nag,
+		.woocommerce-layout__header,
+		.woocommerce-store-alerts { display: none !important; }
 		html.wp-toolbar { padding-top: 0 !important; }
 		#wpcontent, #wpbody-content { margin-left: 0 !important; padding-left: 0 !important; padding-bottom: 0 !important; }
 		#wpbody { padding-top: 0 !important; }
 		body.wp-admin { min-width: 0 !important; }
 	</style>';
+}
+
+/**
+ * Take WordPress's and WooCommerce's banners off the picture, and no others.
+ *
+ * A banner across the top of an admin screen is over whatever is being
+ * photographed, so the four notice hooks used to be emptied wholesale. That is
+ * right for WordPress and WooCommerce and wrong for the plugin under test: its
+ * notices are the shop's own voice, and a shop being warned about something is
+ * exactly the shop whose picture must not come out clean.
+ *
+ * The markup cannot tell them apart -- every one of them is a div.notice -- and
+ * neither can the position, because all of them are printed in the same strip
+ * above the page's content. What does tell them apart is who wrote the callback,
+ * so each one is asked which file it was defined in. Anything from wp-admin,
+ * wp-includes or WooCommerce goes. Everything else is kept, including a callback
+ * whose origin cannot be read at all: dropping one of those silently is the
+ * failure being fixed, and keeping it means the worst case is a run that stops
+ * and names it.
+ *
+ * What is kept is then *not printed*. That is deliberate, and it is what makes
+ * this change cost no framing: a notice reinstated at the top of the page would
+ * move every subject below it down, and every shot list in use was written
+ * against the layout as it is. So the kept callbacks are run into a buffer, the
+ * markup is thrown away, and a warning found in it refuses the shot instead --
+ * the picture is unchanged, and the alternative to it being in the picture is
+ * the run stopping rather than nobody hearing about it.
+ *
+ * Running them is what it costs. A notice callback is print-only in everything
+ * this harness installs, but it is the page's own code and it is now executed
+ * where before it was removed, so a callback with a side effect has that side
+ * effect. The alternative is to judge by what is registered rather than by what
+ * would have been printed, and that refuses every shot in a range where the
+ * usual case is a notice registered unconditionally and printed almost never.
+ */
+function pc_shot_thin_the_notices(): void {
+	foreach ( array( 'admin_notices', 'all_admin_notices', 'network_admin_notices', 'user_admin_notices' ) as $hook ) {
+		$kept = array();
+
+		if ( isset( $GLOBALS['wp_filter'][ $hook ] ) && $GLOBALS['wp_filter'][ $hook ] instanceof WP_Hook ) {
+			foreach ( $GLOBALS['wp_filter'][ $hook ]->callbacks as $priority => $group ) {
+				foreach ( $group as $one ) {
+					if ( ! pc_shot_notice_is_furniture( $one['function'] ) ) {
+						$kept[] = array( $one['function'], (int) $priority );
+					}
+				}
+			}
+		}
+
+		remove_all_actions( $hook );
+
+		if ( array() === $kept ) {
+			continue;
+		}
+
+		// One private hook per public one rather than all four collapsed into a
+		// single pass. network_admin_notices and user_admin_notices fire only on
+		// their own screens, and a callback moved off one of those onto
+		// admin_notices would be run on screens WordPress never runs it on.
+		$private = 'pc_shot_kept_' . $hook;
+
+		foreach ( $kept as $one ) {
+			add_action( $private, $one[0], $one[1] );
+		}
+
+		add_action(
+			$hook,
+			static function () use ( $private ): void {
+				ob_start();
+				do_action( $private ); // phpcs:ignore WordPress.NamingConventions.ValidHookName.UseUnderscores -- built above from a core hook name.
+				pc_shot_swallowed_warnings( (string) ob_get_clean() );
+			},
+			1
+		);
+	}
+}
+
+/**
+ * Whether a notice callback belongs to WordPress or to WooCommerce.
+ *
+ * Asked of the file the callback was defined in, which is the only thing about a
+ * callback that says where it came from. A closure, a plain function name, a
+ * static call written as a string and an object method are all reachable this
+ * way; anything that is not is treated as not ours to remove.
+ *
+ * @param callable|string|array<int,mixed>|object $callback Whatever was hooked.
+ */
+function pc_shot_notice_is_furniture( $callback ): bool {
+	$file = pc_shot_callback_file( $callback );
+
+	if ( '' === $file ) {
+		return false;
+	}
+
+	$file = wp_normalize_path( $file );
+
+	$theirs = array(
+		wp_normalize_path( ABSPATH . 'wp-admin/' ),
+		wp_normalize_path( ABSPATH . WPINC . '/' ),
+		wp_normalize_path( WP_PLUGIN_DIR . '/woocommerce/' ),
+	);
+
+	foreach ( $theirs as $one ) {
+		if ( 0 === strpos( $file, $one ) ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * The file a callback was defined in, or '' if that cannot be read.
+ *
+ * @param callable|string|array<int,mixed>|object $callback Whatever was hooked.
+ */
+function pc_shot_callback_file( $callback ): string {
+	try {
+		if ( $callback instanceof Closure ) {
+			return (string) ( new ReflectionFunction( $callback ) )->getFileName();
+		}
+
+		if ( is_string( $callback ) && false !== strpos( $callback, '::' ) ) {
+			return (string) ( new ReflectionMethod( $callback ) )->getFileName();
+		}
+
+		if ( is_string( $callback ) && function_exists( $callback ) ) {
+			return (string) ( new ReflectionFunction( $callback ) )->getFileName();
+		}
+
+		if ( is_array( $callback ) && isset( $callback[0], $callback[1] ) && is_string( $callback[1] ) ) {
+			return (string) ( new ReflectionMethod( $callback[0], $callback[1] ) )->getFileName();
+		}
+
+		if ( is_object( $callback ) && method_exists( $callback, '__invoke' ) ) {
+			return (string) ( new ReflectionMethod( $callback, '__invoke' ) )->getFileName();
+		}
+	} catch ( ReflectionException $e ) {
+		return '';
+	}
+
+	return '';
+}
+
+/**
+ * Remember any warning that was kept out of the picture, so the frame can refuse.
+ *
+ * Read out of the markup rather than out of the callback, because the question
+ * is not whether a plugin might warn the shop about something but whether on
+ * this screen, in this shop, it did.
+ *
+ * Only a warning or an error. "Settings saved." and "3 products were changed."
+ * are on the same hooks and in the same markup, and a check that refused a shot
+ * for either would be switched off within a day; neither is the shop being told
+ * something is wrong. So those are still removed without a word, which is a
+ * limit worth knowing rather than an oversight.
+ *
+ * @param string|null $html Markup to read, or null to read the list back.
+ *
+ * @return array<int,string>
+ */
+function pc_shot_swallowed_warnings( ?string $html = null ): array {
+	static $said = array();
+
+	if ( null === $html ) {
+		return array_keys( $said );
+	}
+
+	if ( 1 === preg_match( '/class="[^"]*\b(?:notice-warning|notice-error|woocommerce-error)\b/', $html ) ) {
+		$sentence = trim( (string) preg_replace( '/\s+/', ' ', wp_strip_all_tags( $html ) ) );
+
+		if ( '' !== $sentence ) {
+			$said[ pc_shot_shorten( $sentence ) ] = true;
+		}
+	}
+
+	return array_keys( $said );
+}
+
+/**
+ * As much of a sentence as fits across the top of a rejected render.
+ *
+ * @param string $said What was said.
+ * @param int    $most How much of it to keep.
+ */
+function pc_shot_shorten( string $said, int $most = 200 ): string {
+	if ( mb_strlen( $said ) <= $most ) {
+		return $said;
+	}
+
+	return rtrim( mb_substr( $said, 0, $most - 1 ) ) . '…';
 }
 
 /**
@@ -385,6 +588,28 @@ function pc_shot_print_watcher( array $excuse = array() ): void {
 			x.addEventListener("abort",function(){ if(settle()){ bad("given up before it answered: "+u); } });
 			return send.apply(this,arguments);
 		};
+		/* An image is asked for by the browser rather than by the page, so it is
+		   neither a fetch nor an XMLHttpRequest and nothing above sees it. A
+		   product page came back once in three runs with the product photograph
+		   broken and the basket count missing -- the right size, the right crop,
+		   refused by nothing -- which is the same silent failure as the too-tall
+		   crop through a door the watch was not on.
+
+		   The capture phase is not optional: a resource error does not bubble, so
+		   a listener on window in the ordinary phase is never called. What tells
+		   it apart from a script error is having a target that is an element. */
+		window.addEventListener("error",function(e){
+			var n=e&&e.target;
+			if(!n||n===window||!n.tagName){ return; }
+			var u=n.currentSrc||n.src||n.href||"";
+			if(!u||!watch(u)){ return; }
+			w.asked++;
+			bad("did not load: "+u);
+		},true);
+		/* Read by the footer script, which waits for the images the browser is
+		   still fetching. An excused one is excused here too, and counting it
+		   against the excuse is what keeps a stale one stale. */
+		w.watch=watch;
 	})();</script>',
 		wp_json_encode( array_values( $excuse ) )
 	);
@@ -539,7 +764,7 @@ function pc_shot_steps( string $click ): array {
 function pc_shot_print_script( string $click, string $frame, int $pad, bool $posted = false ): void {
 	printf(
 		'<script>window.addEventListener("load",function(){
-			var steps=%1$s, frame=%2$s, pad=%3$d, rule=%4$s, posted=%5$s, key=%6$s, refused=%7$s;
+			var steps=%1$s, frame=%2$s, pad=%3$d, rule=%4$s, posted=%5$s, key=%6$s, refused=%7$s, swallowed=%8$s;
 			var report="";
 			/* Where the sequence got to, kept across the navigation the last step
 			   causes. A fresh browser profile per shot means nothing here is ever
@@ -631,7 +856,67 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 			}
 			settle();
 			var w=window.pcShotWatch||{inflight:0,failed:[]};
-			var touched=Date.now(), watching=null, drawn=null, verdict=null, steady=0, last=null;
+			var touched=Date.now(), watching=null, drawn=null, verdict=null, steady=0, last=null, strayed="";
+			/* A warning the shim kept out of the picture is not a picture this
+			   set may have. It is reported first and unconditionally, because it
+			   is true of the document rather than of the frame: no selector and
+			   no viewport would have put it back. */
+			for(var q=0;q<swallowed.length;q++){
+				w.failed.push("a warning was taken off the top of this page, so it is not in the picture: "+JSON.stringify(swallowed[q]));
+			}
+			/* An image the browser has not finished fetching is not a request the
+			   watch can see -- the page asks for a fetch, and the browser asks for
+			   an <img> by itself. One that failed reports complete, and the error
+			   listener in the watch has already said so; one still on its way is
+			   what this counts, so a shot taken over a gap comes out cyan rather
+			   than as a picture with a hole in it. */
+			function waiting(){
+				var imgs=document.images||[], n=0;
+				for(var i=0;i<imgs.length;i++){
+					if(imgs[i].complete){ continue; }
+					var u=imgs[i].currentSrc||imgs[i].src||"";
+					if(!u){ continue; }
+					if(w.watch&&!w.watch(u)){ continue; }
+					n++;
+				}
+				return n;
+			}
+			/* A warning is only in the picture if it is inside the frame, and a
+			   frame is a selector somebody wrote by hand. So a shop being warned
+			   about something could still be photographed clean by a frame drawn
+			   round the card below the warning, and nothing about the result would
+			   say so. That is the whole reason this is checked here rather than
+			   left to whoever reads the picture afterwards.
+
+			   Warnings and errors only, and the reason is the same one that keeps
+			   this check alive: "Settings saved." is on nearly every admin screen
+			   a capture visits, it is not the shop being told something is wrong,
+			   and a check that refused those would be switched off inside a day.
+
+			   Fully inside, not overlapping. Half a warning is worse than none:
+			   it looks deliberate. */
+			var WARNED=".notice-warning,.notice-error,.woocommerce-error,"
+				+".wc-block-components-notice-banner.is-error,"
+				+".wc-block-components-notice-banner.is-warning";
+			function outside(box){
+				if(!box){ return ""; }
+				var L=Math.max(0,box.left-pad), T=Math.max(0,box.top-pad);
+				var R=box.right+pad, B=box.bottom+pad;
+				var found=document.querySelectorAll(WARNED);
+				for(var i=0;i<found.length;i++){
+					var b=found[i].getBoundingClientRect();
+					/* Nothing is measured that has no size, which is how a
+					   notice kept in the document by a script that has not
+					   shown it yet stays out of this. */
+					if(b.width<=1||b.height<=1){ continue; }
+					if(b.left+window.scrollX>=L-1&&b.top+window.scrollY>=T-1
+						&&b.right+window.scrollX<=R+1&&b.bottom+window.scrollY<=B+1){ continue; }
+					return "the shop is being warned about something and the warning is outside the frame: "
+						+JSON.stringify((found[i].textContent||"").replace(/\\s+/g," ").trim().slice(0,200))
+						+" -- widen the frame to take it in, or put the shop right. Do not publish this screen without it.";
+				}
+				return "";
+			}
 			if(window.MutationObserver){
 				watching=new MutationObserver(function(){ touched=Date.now(); });
 				watching.observe(document.documentElement,
@@ -663,8 +948,8 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 			}
 			function whyNow(){
 				if(report){ return "undone"; }
-				if(w.failed.length){ return "failed"; }
-				if(w.inflight>0){ return "pending"; }
+				if(w.failed.length||strayed){ return "failed"; }
+				if(w.inflight>0||waiting()>0){ return "pending"; }
 				return unused().length?"stale":"ok";
 			}
 			function why(){
@@ -672,8 +957,10 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 			}
 			function say(v){
 				var lines=w.failed.slice(0);
+				if("failed"===v&&strayed){ lines.push(strayed); }
 				if("undone"===v){ lines.push(report); }
-				if("pending"===v){ lines.push(w.inflight+" request(s) had not answered when the picture was taken"); }
+				if("pending"===v&&w.inflight>0){ lines.push(w.inflight+" request(s) had not answered when the picture was taken"); }
+				if("pending"===v&&waiting()>0){ lines.push(waiting()+" image(s) had not arrived when the picture was taken"); }
 				if("moved"===v){ lines.push("the subject was still moving when the picture was taken"); }
 				if("stale"===v){ lines.push("nothing on this page asked for: "+unused().join(", ")); }
 				var note=document.getElementById("pc-shot-why");
@@ -734,12 +1021,13 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 				if(!drawn){
 					steady=put(here,last)?steady+1:0;
 					last=here;
-					var ready=here&&steady>=2&&w.inflight===0&&(now-touched)>=250;
+					var ready=here&&steady>=2&&w.inflight===0&&waiting()===0&&(now-touched)>=250;
 					if(!ready&&now<giveUpAt){ return; }
 					/* Nothing is drawn when the selector matched nothing: a
 					   missing rule is the cropper telling you about the
 					   selector, and a rule round nowhere would not be. */
 					if(!here){ return; }
+					strayed=outside(here);
 					verdict=why();
 					drawn=here;
 					/* Disconnected before the rule goes in, or drawing it looks
@@ -751,7 +1039,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 					draw(drawn,verdict);
 					return;
 				}
-				if(w.failed.length){
+				if(w.failed.length||strayed){
 					if("failed"!==verdict){ verdict="failed"; draw(drawn,verdict); }
 					return;
 				}
@@ -767,6 +1055,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 				   patience runs out is refused. */
 				if(here&&now<giveUpAt){
 					drawn=here;
+					strayed=outside(here);
 					verdict=whyNow();
 					draw(drawn,verdict);
 					return;
@@ -780,6 +1069,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 		wp_json_encode( PC_SHOT_RULE ),
 		$posted ? 'true' : 'false',
 		wp_json_encode( $click ),
-		wp_json_encode( pc_shot_refused_nonces() )
+		wp_json_encode( pc_shot_refused_nonces() ),
+		wp_json_encode( pc_shot_swallowed_warnings() )
 	);
 }
