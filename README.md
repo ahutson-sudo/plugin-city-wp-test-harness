@@ -955,6 +955,75 @@ happen to cost, and a session row written by an earlier run is read in
 preference to anything this one did — so a set can come back byte for byte
 identical twice over and still be of a state no seed ever asked for.
 
+### A fourth that does not look like anything at all
+
+The three above cost time because they look like a fault. This one costs more
+because it looks like a success: the page draws completely, the run saves, the
+file is the size you expected, and the photograph is of the **free edition**
+with the paid one captioned underneath it.
+
+It applies to any plugin whose paid edition runs on an install grace — a window
+after installation in which the paid features work before a licence key has
+been entered. Two ordinary details of how such a grace is written decide
+whether a capture photographs the edition it believes it is photographing:
+
+- **The clock has to start somewhere, and not on a shopper's page load.**
+  Writing the install stamp on every front-end request until one of them
+  succeeds is a database write nobody wants, so the stamp is written on the
+  first **admin** request or on a cron run, and nowhere else. Until one of
+  those happens there is no stamp.
+- **A grace that returns whenever the stamp is missing is a grace anybody can
+  have twice.** So the code usually asks a second question before handing one
+  out: has this plugin run on this site before? The evidence it looks for is
+  the paid plugin's own options already being in the database — which reads as
+  a site whose licence key has been removed, not as a fresh install, and the
+  grace is refused rather than granted.
+
+A seed meets both of those in the worst possible order. It writes the paid
+edition's options directly, through WP-CLI, which is neither an admin request
+nor cron. So no stamp is written, the options are there to be found, and the
+plugin concludes it is running unlicensed on a site that has had its key taken
+away. Every paid feature switches itself off, and the storefront draws the free
+edition while the paid plugin sits there installed and active.
+
+Nothing here catches that. Every refusal this harness makes is about a page
+that failed to draw — an asset that did not arrive, a frame that does not close
+on all four sides, a request that came back an error, a subject that moved
+after it was measured — and this page did not fail to draw. It is a complete,
+correct, reproducible photograph of the wrong product, and only a reader who
+already knows what the paid edition looks like can tell.
+
+**What makes a set safe, and it is structural rather than lucky.** The whole
+shot list is warmed before the first shutter opens, not each shot before
+itself. So a single `wp-admin` path anywhere in the list — first line or last —
+writes the install stamp while warming, and every shot in the set, storefront
+ones included, is then of the licensed edition. Most published sets are mostly
+wp-admin screens, so most sets are safe without anyone having arranged it.
+
+**What makes one exposed is a shot list of storefront paths only.** That is an
+easy list to write, because the storefront is the half a customer sees and the
+half worth showing: a product page, a category page, a cart, a checkout, and
+nothing else. Such a list never makes an admin request, so the stamp is never
+written and every shot in it is of the free edition.
+
+Note that warming does not help by being done as the administrator, which it
+is. `is_admin()` is decided by the path, not by who is asking for it, so a
+storefront list warmed as the administrator is still a storefront list and
+still writes no stamp.
+
+**So the fix is a line of shot list rather than a change here.** Have one
+`wp-admin` path in the list; where it sits does not matter, because warming has
+finished before anything is photographed. The settings screen the plugin is
+being sold on is usually in the set anyway, which is why this is cheaper than
+any check. Where a set genuinely has no admin screen in it, the seed can write
+the stamp itself — by asking the plugin's own licence code to record an
+installation, or by requesting `wp-cron.php` once after seeding.
+
+And whatever the list looks like, it is worth finding one thing in one
+storefront shot that only the paid edition draws, and confirming it is there,
+before a set is published. That is thirty seconds and it is the only check that
+does not depend on knowing any of the above.
+
 ### A warning about the shop has to be in the picture
 
 Published sets in this range are cropped to the plugin's own screen, so the
