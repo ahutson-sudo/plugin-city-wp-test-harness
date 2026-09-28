@@ -818,6 +818,19 @@ Both, not one. With `woocommerce_store_pages_only` left at `yes` the shop and
 product pages stay behind the page while the rest of the site comes out, which
 reads as the first option not having worked.
 
+**WooCommerce sends its first wp-admin request to its own setup wizard.** On a
+shop nobody has opened, the first wp-admin request anybody makes is the camera's,
+so the screen the shot was pointed at answers 302 and the run fails for a frame
+it could not find — which reads as a wrong selector in the shot list.
+`seed_open_the_storefront()` clears it, and a seed that does not use the helper
+needs both of these, because WooCommerce has kept the flag in a transient and in
+an option at different versions:
+
+```php
+delete_transient( '_wc_activation_redirect' );
+delete_option( '_wc_activation_redirect' );
+```
+
 ### What cannot be photographed
 
 Whoever writes the captions needs to know what this will not do, because a caption
@@ -876,12 +889,27 @@ left.
   before the shutter opens, but only on elements; one declared on a `::before` or
   `::after` cannot be reached, and a shot containing one will not reproduce byte
   for byte.
+- **A screen whose second step has to wait for what the first one started.** The
+  steps in a `click` column are taken on the load event, in one pass, with no
+  pause between them, so a step cannot wait for a request an earlier step set in
+  motion. WooCommerce's Variations panel is the case: the tab is clicked, the
+  rows are fetched over admin-ajax, and the Expand link in the toolbar beside
+  them is clicked before any row exists. The click *succeeds* — the toolbar was
+  rendered with the page — and expands an empty list, so the panel photographs
+  with its rows collapsed and nothing is refused, because every selector
+  matched. Aim a step at a row instead and the refusal says it plainly: `step 2
+  of 2 did not happen: nothing on this page matches
+  ".woocommerce_variation:first-child .handlediv"`. A sequence can fill in a
+  form, because a form is on the page already; it cannot work through a screen
+  that builds itself a piece at a time.
 
-Two of those are worth saying again because they are the ones that produce a file
-rather than an error: a third-party embed, and a pseudo-element animation. A green
-run is evidence that the pages loaded and the crops are in the right place. It is
-not evidence that the pictures show what a caption says they show, and nothing
-here can be.
+Three of those are worth saying again because they are the ones that produce a
+file rather than an error: a third-party embed, a pseudo-element animation, and a
+step that clicked something real and achieved nothing. A green run is evidence
+that the pages loaded and the crops are in the right place. It is not evidence
+that the pictures show what a caption says they show, and nothing here can be.
+
+### Driving the containers
 
 **Drive `docker compose` through this repo's scripts, never directly.**
 `scripts/lib.sh` sets `COMPOSE_PROJECT_NAME`, and it also decides which Compose

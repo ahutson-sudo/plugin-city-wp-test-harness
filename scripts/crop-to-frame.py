@@ -29,7 +29,7 @@ RULE = 2 * SCALE  # the rule's own width, in device pixels
 
 # Each verdict is the colour its rule is drawn in, said as which channels are
 # up and which are down: nothing in wp-admin, a block theme or WooCommerce
-# draws any of the five, and testing them as extremes rather than as exact
+# draws any of the six, and testing them as extremes rather than as exact
 # values allows for the antialiasing on a fractional edge.
 VERDICTS = (
     ("ok", "high", "low", "high"),
