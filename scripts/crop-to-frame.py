@@ -58,9 +58,10 @@ REFUSED = {
     "stale": (
         "a line in the shot list named something this page has not got. Either an "
         "allow line excused a request the page never makes, so the check it switches "
-        "off is switched off for nothing, or part of the frame matched nothing, so "
-        "the crop would be narrower than the shot asked for. Which of the two, and "
-        "which fragment, is written across the top of the raw render."
+        "off is switched off for nothing, or some or all of the frame matched "
+        "nothing, so the crop would have been narrower than the shot asked for. "
+        "Which of the two, and which fragment, is written across the top of the raw "
+        "render."
     ),
     "undone": (
         "one of the steps in this shot's click column did not happen, so this is "

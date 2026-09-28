@@ -905,7 +905,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 			}
 			settle();
 			var w=window.pcShotWatch||{inflight:0,failed:[]};
-			var touched=Date.now(), watching=null, drawn=null, verdict=null, steady=0, last=null, strayed="";
+			var touched=Date.now(), watching=null, drawn=null, verdict=null, steady=0, last=null, strayed="", nothing=false;
 			/* A warning the shim kept out of the picture is not a picture this
 			   set may have. It is reported first and unconditionally, because it
 			   is true of the document rather than of the frame: no selector and
@@ -1070,7 +1070,16 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 				if("pending"===v&&waiting()>0){ lines.push(waiting()+" image(s) had not arrived when the picture was taken"); }
 				if("moved"===v){ lines.push("the subject was still moving when the picture was taken"); }
 				if("stale"===v&&unused().length){ lines.push("nothing on this page asked for: "+unused().join(", ")); }
-				if("stale"===v&&absent().length){ lines.push("part of the frame is not on this page, so the crop would be narrower than the shot asked for: "+absent().join("; ")); }
+				if("stale"===v&&absent().length){
+					/* Said two ways, because the whole frame being absent means
+					   there was no subject at all and the rule is sitting on a
+					   rectangle of its own -- and a sentence about a crop being
+					   narrower would send somebody looking for a picture. */
+					var gone=absent();
+					lines.push(gone.length===pieces(frame).length
+						?"nothing in the frame is on this page, so there was no subject to crop to: "+gone.join("; ")
+						:"part of the frame is not on this page, so the crop would be narrower than the shot asked for: "+gone.join("; "));
+				}
 				var note=document.getElementById("pc-shot-why");
 				if(!note){
 					note=document.createElement("div");
@@ -1140,6 +1149,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 					if(!here){
 						drawn=nowhere();
 						verdict="stale";
+						nothing=true;
 						if(watching){ watching.disconnect(); watching=null; }
 						draw(drawn,verdict);
 						return;
@@ -1156,6 +1166,12 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 					draw(drawn,verdict);
 					return;
 				}
+				/* The rule is on a rectangle of its own, so there is nothing to
+				   re-measure and nothing that could move. Without this the
+				   watch below reads an unmeasurable subject as one that has
+				   moved, and the render goes out carrying that reason instead
+				   of the frame it was really refused for. */
+				if(nothing){ return; }
 				if(w.failed.length||strayed){
 					if("failed"!==verdict){ verdict="failed"; draw(drawn,verdict); }
 					return;
