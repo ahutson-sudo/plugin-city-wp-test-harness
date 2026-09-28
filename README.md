@@ -410,7 +410,8 @@ Each row resets volumes so image and database state do not leak. Edit the TSV to
 | `error_log_contents()` / `clear_error_logs()` | Inspect PHP / WP debug logs |
 | `assert_true()` / `assert_same()` | Tiny assertions |
 | `seed_us_shop()` | A US shop in dollars, for screenshots — see below |
-| `seed_hand_the_cart_to()` | Give a seeded cart to the customer the shots are taken as |
+| `seed_start_a_cart_for()` | Begin a basket as the customer the shots are taken as |
+| `seed_hand_the_cart_to()` | Give that basket, and its chosen delivery method, to them |
 | `seed_record_id()` / `seed_finish()` | Record what a seed made, so a shot list need not know ids |
 
 Load them with:
@@ -962,12 +963,22 @@ The basket survives anyway, and that is what makes this expensive rather than
 obvious: WooCommerce keeps a persistent copy against the account and restores it
 at sign-in, so the products, the quantities and the totals are all right in the
 picture. Only what lives *solely* in the session is gone. The chosen shipping
-method is the one that matters — WooCommerce picks again and takes the cheapest
-rate it can find, so a plugin that says something about delivery, or that treats
-one method differently from another, photographs a page that drew perfectly and
-has nothing on it. It is the same shape as the Coming soon page one step further
-in: a file of the expected size, nothing logged, and a subject that is simply
-absent.
+method is the one that matters — WooCommerce picks again, so a plugin that says
+something about delivery, or that treats one method differently from another,
+photographs a page that drew perfectly and has nothing on it. It is the same
+shape as the Coming soon page one step further in: a file of the expected size,
+nothing logged, and a subject that is simply absent.
+
+What it picks is **not the cheapest rate**, and that guess is worth getting out
+of the way because it is why this survives being looked at.
+`wc_get_default_shipping_method_for_package()` takes the first rate in the
+package that is not a local pickup method — which is the order the methods were
+added to the zone. A seed that adds free shipping before its flat rate therefore
+gets free shipping in the picture whatever it asked for, *and* gets it for the
+basket that qualifies and not for the one that does not, which is
+indistinguishable from the seed having worked. Reorder the two lines that build
+the zone and the same shot list charges postage under a bar announcing free
+delivery.
 
 `seed_hand_the_cart_to( $customer_id )` writes the session row against the
 customer, after the cart is filled and the totals are worked out. A seed that
@@ -985,8 +996,8 @@ $wpdb->replace(
 ```
 
 It is also what makes such a shot reproduce, which is the part that hides the
-fault for longest. Left to WooCommerce the method depends on what the zones
-happen to cost, and a session row written by an earlier run is read in
+fault for longest. Left to WooCommerce the method depends on the order the zone
+was built in, and a session row written by an earlier run is read in
 preference to anything this one did — so a set can come back byte for byte
 identical twice over and still be of a state no seed ever asked for.
 
@@ -1005,6 +1016,48 @@ So the only reproduction check that means anything here starts from an empty
 shop in a fresh container. Re-running a capture against the shop that is already
 there compares the leftover row with itself, and will report byte-for-byte
 agreement however wrong the subject of the picture is.
+
+#### Three rules for a seed that chooses a delivery method
+
+Pinning a method turns out to need three things, none of which announces itself
+when it is missing. One is now done for you and two cannot be.
+
+**Start the cart as the customer, before filling it.** `seed_start_a_cart_for(
+$customer_id )` signs the customer in and throws the session away so WooCommerce
+builds a new one. `wc_load_cart()` alone does not do this: `initialize_session()`
+builds only when there is nothing there already, so a second call hands back the
+session the process is still holding. A seed that photographs two customers
+otherwise fills one basket, hands it over, fills "another", and writes the first
+customer's basket under the second customer's id. Which customer a session
+belongs to is decided once, when it is built, by asking who is signed in at that
+moment — signing in afterwards is too late and nothing says so.
+
+`seed_hand_the_cart_to()` checks this and names both customers if they disagree.
+It cannot repair it, because by then the cart has been filled against the wrong
+session.
+
+**Pin after the last `calculate_totals()`, never before it.** Totals do not
+leave a chosen method alone: they ask
+`wc_get_chosen_shipping_method_for_package()` for each package, whose job is to
+second-guess the stored choice and replace it with the default when it
+disagrees, and on a session that has never served a page load it always
+disagrees. A pin written first is replaced during the totals by the first rate
+in the zone, and the session afterwards looks exactly as though the seed had
+pinned nothing at all. Nothing can tell those two apart afterwards, so nothing
+tries: `seed_hand_the_cart_to()` prints the method the photograph is going to
+use and whether anything in the seed is holding it there. That line is the
+check, and it is worth reading.
+
+**Three session keys are needed, not one — and this part is done for you.**
+`chosen_shipping_methods` on its own is discarded before it is read, because
+`previous_shipping_methods` and `shipping_method_counts` are how WooCommerce
+notices that a shop changed underneath a customer who had already chosen, and an
+absent key reads as "everything differs". `seed_settle_the_delivery_method()`
+writes both from the packages actually on offer, and
+`seed_hand_the_cart_to()` calls it. It also refuses quietly-wrong input out
+loud: a stored rate that is not among the rates the cart is offered earns a
+message naming what is, because a rate id is minted when the method is added to
+a zone and a rebuilt shop gives the same van a different number.
 
 ### A fourth that does not look like anything at all
 
