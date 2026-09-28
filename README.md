@@ -87,6 +87,7 @@ plugin-city-wp-test-harness/
   tests/
     generic/          # harness-owned smoke tests
     helpers/          # reusable integration helpers
+    host/             # checks on the harness scripts themselves, run outside the containers
   .github/workflows/plugin-tests.yml.example
 ```
 
@@ -137,6 +138,66 @@ PLUGIN_SLUG=due-date-for-woocommerce \
 - `start.sh` brings up MariaDB and WordPress and waits until WP-CLI can talk to the site
 - `stop.sh` stops containers and **keeps** the database volume
 - `reset.sh` removes containers **and** volumes
+
+### Fetching the images
+
+`start.sh` fetches whichever of the three images this machine has not got before
+it starts anything, and gives each one three attempts, ten and twenty seconds
+apart. `PC_PULL_ATTEMPTS` and `PC_PULL_RETRY_SECONDS` change that budget, and
+`PC_PULL_ATTEMPTS=1` turns the retry off.
+
+Compose would fetch them anyway as part of `up`. Doing it first is what makes a
+retry possible at all: left where it was, the fetch is half of the command that
+starts the database, so a dropped connection kills the whole `up` before the
+harness has reached the database wait and said anything. A job that failed that
+way reads as one line about a manifest, with nothing to say that no code had run.
+
+Only a missing image is fetched, which is what `up` did. A moving tag such as
+`mariadb:11` or `wordpress:php8.3-apache` is not refreshed by either, so a
+machine that already holds the three images still starts with no registry
+reachable at all.
+
+**What is retried, and what deliberately is not.**
+
+- **A registry that cannot be reached, or that drops the connection.** This is
+  the one worth covering: it fails in seconds, it usually succeeds on the next
+  attempt, and it has failed a real job in this range 3.5 seconds in, before any
+  code ran.
+- **A registry that answers and refuses is tried once.** A tag or a repository
+  that does not exist, or one that needs credentials this machine has not got, is
+  the same answer every time, so three of them only print it later. Not every
+  WordPress and PHP pair is a published tag, and that is the usual way to meet
+  this one; the failure says so and points at `WP_VERSION` and `PHP_VERSION`.
+- **A database that comes up and fails its health check is not retried**, and the
+  retry is around the fetch alone for that reason. It is a real failure, and it
+  takes the whole health budget below to produce, so a second and third go turn a
+  red job into a slow red job.
+- **Nothing after the containers start is retried.** The WordPress install, the
+  WooCommerce download, and every test fail once, on purpose.
+
+A fetch that uses up its attempts says so, in those words and with the number,
+because a job that failed three times should not read like a job that failed once
+and get re-run on a guess:
+
+```
+=== Could not pull wordpress:php8.3-apache after 3 attempts ===
+Every attempt failed to reach or finish with the registry, and what
+it said last is above. Nothing in the plugin and nothing in this
+harness has run yet, so this is not a test result.
+
+3 failures in a row is more than a dropped connection, so
+re-running the job is a guess rather than a fix. Check that the
+registry is reachable from this machine first.
+```
+
+`tests/host/pull-retry.sh` proves all three behaviours against a throwaway
+Compose file — a host that does not resolve is tried three times, a tag Docker
+Hub refuses is tried once, and an image already on the machine is not fetched at
+all. It starts no containers, so it is safe to run beside a stack that is up.
+
+A registry failure that this does not cover can still arrive wearing something
+else's clothes. That is under
+[Two failures that are the machine and not the plugin](#two-failures-that-are-the-machine-and-not-the-plugin).
 
 ### Waiting for MariaDB
 
