@@ -664,6 +664,17 @@ reproduce, because none of them announces itself and none of them fails:
   is, and the infinite ones are dropped back on the style they were animating from
   — which, for decoration, is the picture anyway. An animation declared on a
   `::before` or `::after` cannot be reached this way and is the one case left.
+- **The browser's locale is pinned, because two kinds of field are not drawn by
+  WordPress.** `<input type="date">` and `<input type="time">` are drawn by the
+  browser, in the browser's own locale, and no amount of setting `date_format` in
+  the database reaches them. So the same settings tab photographed on two machines
+  reads `11/10/2026` and `04:30 PM` on one and `10/11/2026` and `16:30` on the
+  other, nothing fails either time, and a set has already shipped carrying the
+  capture machine's idea of a date rather than the shop's. The driver runs Chrome
+  with `LC_ALL` and `LANG` set to `en_US.UTF-8`. It is not `--lang`, which is the
+  obvious fix and changes nothing: the control asks ICU for the default locale and
+  ICU reads the environment, so `--lang=en-GB` and `--lang=de` come back byte for
+  byte identical to `--lang=en-US`.
 
 The one thing none of that can fix is a *different shop*, which is the next
 section.

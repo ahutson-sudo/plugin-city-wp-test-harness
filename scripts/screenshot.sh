@@ -334,11 +334,26 @@ shoot() {
   # browser restart, so each shot arrives with no session until the page it
   # renders gives it one -- which is what keeps a signed-out shot signed out
   # however many signed-in shots came before it.
-  "$chrome" --headless=new --disable-gpu --no-sandbox --disable-dev-shm-usage \
-    --hide-scrollbars --force-color-profile=srgb --font-render-hinting=none \
-    --user-data-dir="$profile" --window-size="${width},${height}" \
-    --force-device-scale-factor=2 --virtual-time-budget=12000 \
-    --screenshot="$out" "$url" >/dev/null 2>&1 &
+  #
+  # The locale is pinned because two of the fields these plugins draw are not
+  # drawn by WordPress at all. `<input type="date">` and `<input type="time">`
+  # are rendered by the browser in the browser's own locale, so a settings tab
+  # photographed on one machine reads 11/10/2026 and 04:30 PM and the same tab
+  # on the next reads 10/11/2026 and 16:30. Nothing fails; a set simply carries
+  # the capture machine's idea of a date, and one has already shipped that way.
+  #
+  # It has to be the environment rather than --lang, which is the obvious fix
+  # and does nothing here: en-US, en-GB and de through --lang come back byte for
+  # byte identical, because the control asks ICU for the default locale and ICU
+  # reads LC_ALL and LANG. en_US.UTF-8 is named rather than C because it says
+  # what is wanted, and a box without that locale generated falls back to C,
+  # which renders the same anyway.
+  LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+    "$chrome" --headless=new --disable-gpu --no-sandbox --disable-dev-shm-usage \
+      --hide-scrollbars --force-color-profile=srgb --font-render-hinting=none \
+      --user-data-dir="$profile" --window-size="${width},${height}" \
+      --force-device-scale-factor=2 --virtual-time-budget=12000 \
+      --screenshot="$out" "$url" >/dev/null 2>&1 &
   local pid=$! last=-1 stable=0 waited=0 size
   while [ "$waited" -lt 75 ]; do
     sleep 0.4; waited=$(( waited + 1 ))
