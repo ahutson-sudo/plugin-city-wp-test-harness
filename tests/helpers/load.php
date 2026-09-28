@@ -14,3 +14,4 @@ require_once __DIR__ . '/customer.php';
 require_once __DIR__ . '/product.php';
 require_once __DIR__ . '/shipping.php';
 require_once __DIR__ . '/order.php';
+require_once __DIR__ . '/seed-common.php';

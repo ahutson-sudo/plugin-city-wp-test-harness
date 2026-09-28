@@ -134,9 +134,123 @@ pc_wait_for_db() {
   return 1
 }
 
+pc_images() {
+  pc_compose config --images 2>/dev/null | awk 'NF' | sort -u
+}
+
+# A registry that answers and refuses gives the same answer every time, so these
+# are reported on the first attempt rather than the third: a tag or a repository
+# that does not exist, and anything that cannot be read without credentials this
+# machine has not got. The way a harness run usually meets the first of them is a
+# WordPress and PHP pair that was never published as a tag.
+pc_pull_answer_is_final() {
+  grep -Eqi 'manifest unknown|manifest for .+ not found|: not found|repository does not exist|pull access denied|requested access to the resource is denied|unauthorized|authentication required|invalid reference format|no matching manifest' "$1"
+}
+
+pc_pull_image() {
+  local image="$1" attempts="${PC_PULL_ATTEMPTS}" pause="${PC_PULL_RETRY_SECONDS}"
+  local attempt=1 log
+  log="$(mktemp)"
+
+  while :; do
+    if (( attempt == 1 )); then
+      echo "Pulling ${image}..."
+    else
+      echo "Pulling ${image} again (attempt ${attempt} of ${attempts})..."
+    fi
+
+    if docker pull "${image}" 2>&1 | tee "${log}"; then
+      if (( attempt > 1 )); then
+        echo "Pulled ${image} on attempt ${attempt} of ${attempts}."
+      fi
+      rm -f "${log}"
+      return 0
+    fi
+
+    if pc_pull_answer_is_final "${log}"; then
+      echo >&2
+      echo "=== ${image} cannot be pulled, and asking again would not change that ===" >&2
+      echo "The registry answered and refused: the image, the tag or the" >&2
+      echo "permission to read it is the thing that is missing, and that is the" >&2
+      echo "same answer every time, so this was tried once. Not every WordPress" >&2
+      echo "and PHP pair exists as a published tag; check WP_VERSION and" >&2
+      echo "PHP_VERSION against the tags on Docker Hub." >&2
+      rm -f "${log}"
+      return 1
+    fi
+
+    if (( attempt >= attempts )); then
+      echo >&2
+      echo "=== Could not pull ${image} after ${attempts} attempts ===" >&2
+      echo "Every attempt failed to reach or finish with the registry, and what" >&2
+      echo "it said last is above. Nothing in the plugin and nothing in this" >&2
+      echo "harness has run yet, so this is not a test result." >&2
+      echo >&2
+      echo "${attempts} failures in a row is more than a dropped connection, so" >&2
+      echo "re-running the job is a guess rather than a fix. Check that the" >&2
+      echo "registry is reachable from this machine first." >&2
+      rm -f "${log}"
+      return 1
+    fi
+
+    echo "Pulling ${image} failed; waiting ${pause}s before attempt $(( attempt + 1 )) of ${attempts}."
+    sleep "${pause}"
+    attempt=$(( attempt + 1 ))
+    pause=$(( pause * 2 ))
+  done
+}
+
+# Compose fetches an image it has not got as part of `up`, which is invisible
+# until the registry drops the connection: the fetch is then half of the command
+# that starts the database, the whole `up` dies, and the harness has said nothing
+# because pc_wait_for_db was never reached. A CI job read as one line of Compose
+# output about a manifest, with no hint that no code had run.
+#
+# Fetching first is what makes a retry possible at all. Wrapped around `up`, a
+# retry would also cover a database that came up and failed its health check —
+# which is a real failure, and one that takes the whole health budget to fail
+# again, so three attempts turn a red job into a slow red job. This covers the
+# fetch and nothing else: the health check, the WordPress install, WooCommerce
+# and the tests are all left to fail once.
+#
+# Only images this machine has not got are fetched, which is what `up` did. A
+# moving tag such as mariadb:11 or wordpress:php8.3-apache is not refreshed by
+# either, and a machine holding all three still starts with no registry at all.
+pc_pull_images() {
+  local images=() missing=() image
+
+  while IFS= read -r image; do
+    images+=( "${image}" )
+  done < <(pc_images)
+
+  if (( ${#images[@]} == 0 )); then
+    # Compose older than `config --images` cannot be asked what it would fetch.
+    # Nothing is lost that was not already the case: `up` fetches what it needs,
+    # unretried, exactly as it did before this existed.
+    echo "Could not read the image list from Compose; leaving the fetch to 'up'."
+    return 0
+  fi
+
+  for image in "${images[@]}"; do
+    if ! docker image inspect "${image}" >/dev/null 2>&1; then
+      missing+=( "${image}" )
+    fi
+  done
+
+  if (( ${#missing[@]} == 0 )); then
+    echo "Images already on this machine: ${images[*]}"
+    return 0
+  fi
+
+  for image in "${missing[@]}"; do
+    pc_pull_image "${image}"
+  done
+}
+
 # Start the database on its own so a slow boot is reported as a slow boot.
 # Starting both at once leaves the failure as Compose's dependency message.
 pc_bring_up() {
+  pc_pull_images
   pc_compose up -d db
   pc_wait_for_db
   pc_compose up -d wordpress db
@@ -155,6 +269,11 @@ pc_load_env() {
   WC_VERSION="${WC_VERSION:-latest}"
   HPOS_MODE="${HPOS_MODE:-enabled}"
   WP_PORT="${WP_PORT:-8080}"
+  # Right for tests and wrong for screenshots. A suite wants one fixed timezone
+  # so a date assertion reads the same everywhere; a screenshot wants the
+  # timezone of the shop it is pretending to be, because the dates in the
+  # picture are the thing being sold. Default unchanged.
+  WP_TIMEZONE="${WP_TIMEZONE:-Europe/London}"
   PLUGIN_PATH="${PLUGIN_PATH:-}"
   PLUGIN_SLUG="${PLUGIN_SLUG:-}"
   EXTRA_PLUGIN_PATH="${EXTRA_PLUGIN_PATH:-}"
@@ -163,6 +282,10 @@ pc_load_env() {
   PC_SKIP_GENERIC_TESTS="${PC_SKIP_GENERIC_TESTS:-0}"
   PC_SKIP_PLUGIN_TESTS="${PC_SKIP_PLUGIN_TESTS:-0}"
   PC_DB_WAIT_SECONDS="${PC_DB_WAIT_SECONDS:-240}"
+  # Three attempts, 10s and 20s apart, is enough for a registry that dropped one
+  # connection and short enough that an outage is still reported inside a minute.
+  PC_PULL_ATTEMPTS="${PC_PULL_ATTEMPTS:-3}"
+  PC_PULL_RETRY_SECONDS="${PC_PULL_RETRY_SECONDS:-10}"
 
   if [[ -n "${PLUGIN_PATH}" ]]; then
     if [[ ! -d "${PLUGIN_PATH}" ]]; then
@@ -209,10 +332,10 @@ pc_load_env() {
   WPCLI_IMAGE_TAG="cli-php${PHP_VERSION}"
   COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-pc-${PLUGIN_SLUG:-harness}}"
 
-  export PHP_VERSION WP_VERSION WC_VERSION HPOS_MODE WP_PORT
+  export PHP_VERSION WP_VERSION WC_VERSION HPOS_MODE WP_PORT WP_TIMEZONE
   export PLUGIN_PATH PLUGIN_SLUG EXTRA_PLUGIN_PATH EXTRA_PLUGIN_SLUG PLUGIN_TEST_COMMAND
   export GENERIC_TEST_WC_INACTIVE PC_SKIP_GENERIC_TESTS PC_SKIP_PLUGIN_TESTS
-  export PC_DB_WAIT_SECONDS
+  export PC_DB_WAIT_SECONDS PC_PULL_ATTEMPTS PC_PULL_RETRY_SECONDS
   export WP_IMAGE_TAG WPCLI_IMAGE_TAG COMPOSE_PROJECT_NAME
   export HARNESS_ROOT
 }

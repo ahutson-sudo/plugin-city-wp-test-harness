@@ -13,8 +13,13 @@ jobs:
       - name: Syntax-check scripts and PHP
         run: |
           set -euo pipefail
-          for f in scripts/*.sh; do bash -n "$f"; done
+          for f in scripts/*.sh tests/host/*.sh; do bash -n "$f"; done
           find . -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      # A retry nobody has watched retry is a retry that might not. This starts
+      # no containers, so it costs seconds and cannot collide with the jobs below.
+      - name: Prove the image fetch retries, and only where it should
+        run: ./tests/host/pull-retry.sh
 
   fixture:
     runs-on: ubuntu-latest

@@ -23,7 +23,7 @@ if ! pc_wp core is-installed >/dev/null 2>&1; then
     --skip-email
 fi
 
-pc_wp option update timezone_string "Europe/London" >/dev/null
+pc_wp option update timezone_string "${WP_TIMEZONE}" >/dev/null
 pc_wp rewrite structure '/%postname%/' --hard >/dev/null
 
 if pc_wp plugin is-installed woocommerce >/dev/null 2>&1; then
