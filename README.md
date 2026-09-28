@@ -911,6 +911,27 @@ left.
   reveals itself part way down, is not reachable. Widen or heighten the viewport
   instead of trying to scroll to a subject; a rule with an edge off screen stops
   the run rather than cropping to the part that was visible.
+- **A subject the viewport holds in place rather than the page.** Anything
+  `position: fixed` cannot be framed, and the reason is the rule rather than the
+  subject, which is why no `frame`, `pad` or viewport size gets round it. The rule
+  is an absolutely positioned element put at the subject's *document* coordinates;
+  a fixed element is laid out against the viewport instead, so the two only agree
+  where the page has not scrolled and nothing has offset the body. Two worked
+  cases, both refused. A notification bar pinned to the bottom of a narrow
+  viewport: the picture shows the bar drawn correctly at the foot of the page and
+  the rule about seventy page pixels above it. A cart drawer pinned to the right:
+  a fixed element stretched `left: 0; right: 0` is the full width of the viewport,
+  so there is no room for a rule beside it at any `pad`, and that half needs no
+  arithmetic at all. Both come back as `the rule in … has no right edge, so the
+  subject is bigger than the viewport it was rendered in: raise the width or the
+  height for this shot` — true of the rule and misleading about the cure, because
+  raising either is the one thing that cannot help. **This one stops the run**,
+  which is the kind to want: nothing is saved, so no set quietly gains a picture
+  of a rule round the wrong part of a page. A fixed element does sometimes
+  photograph, and that is luck worth recognising rather than support: one pinned to
+  the top of a page that has not scrolled sits where its document coordinates say
+  it does, so a bar above the theme's own header frames normally while the same bar
+  moved to the bottom will not.
 - **A card form.** The fields belong to the payment gateway, are drawn from its
   servers, and want its keys. Nothing here has any and nothing should be given
   any. A checkout *is* photographable — cheque and cash on delivery draw
