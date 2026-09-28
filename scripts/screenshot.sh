@@ -3,6 +3,14 @@
 #
 #   scripts/screenshot.sh <shots.tsv> [output-dir]
 #
+# Both paths are on the host. This script reads the shot list itself rather than
+# through the container, and writes the pictures beside you. That is worth saying
+# because the command before this one usually is not: a seed is run with
+# scripts/wp.sh, which is WP-CLI inside the container, so it is given a path like
+# /var/www/html/pc-seed/seed.php -- and the shot list sitting in that same copied
+# directory is then the obvious thing to hand over next. It is the wrong side of
+# the mount, and the only report is "No such shot list".
+#
 # The shot list is the plugin's, not the harness's: which screens sell a plugin
 # is an editorial decision and the only part of this that cannot be automated.
 # Columns, tab separated, '#' comments and blank lines ignored:
@@ -48,7 +56,21 @@ shots="${1:?usage: screenshot.sh <shots.tsv> [output-dir]}"
 outdir="${2:-dist/screenshots}"
 here="$(cd "$(dirname "$0")" && pwd)"
 
-[ -r "$shots" ] || { echo "No such shot list: $shots" >&2; exit 1; }
+if [ ! -r "$shots" ]; then
+  echo "No such shot list: $shots" >&2
+  # A path under the document root is almost certainly the container's, because
+  # that is where the seed was just run from, and a reader has no reason to know
+  # the two commands sit on different sides of the mount. Saying so here is the
+  # only place it costs nothing: the alternative is reading this script.
+  case "$shots" in
+    /var/www/html/*)
+      echo "  That is a path inside the container. This script reads the shot list here on the" >&2
+      echo "  host -- only scripts/wp.sh runs in there. Give it the file in the plugin's own" >&2
+      echo "  repository, the one that was copied in." >&2
+      ;;
+  esac
+  exit 1
+fi
 
 pc_require_plugin
 pc_require_docker

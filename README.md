@@ -448,6 +448,14 @@ PLUGIN_PATH=../my-plugin PLUGIN_SLUG=my-plugin ./scripts/install.sh
 python3 scripts/contact-sheet.py ../my-plugin/tests/screenshots/shots.tsv dist/screenshots
 ```
 
+The paths in that block are not all on the same side of the mount, and the two
+middle lines are where it shows. `scripts/wp.sh` is WP-CLI **inside** the
+container, so the seed is named at its path in there; `scripts/screenshot.sh`
+reads the shot list **here on the host** and writes the pictures beside you, so
+it is named at its path in the plugin's repository. Copying a kit in with
+`docker cp` and then reaching for the container's path for both is the mistake
+this is worth spelling out for — the script says so if you do.
+
 Two of those files belong to the plugin and not to the harness, because both are
 editorial rather than mechanical: the **seed** that builds a believable shop, and
 the **shot list** that says which screens sell the plugin. Everything that would
