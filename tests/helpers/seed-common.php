@@ -283,15 +283,18 @@ function seed_start_a_cart_for( int $user_id ): void {
  *
  * One thing this cannot do for you, because by the time it runs the evidence is
  * gone: **pin the method after the last `calculate_totals()`, never before it.**
- * Totals do not leave a chosen method alone. They ask
+ * Totals do not leave a chosen method alone -- they ask
  * `wc_get_chosen_shipping_method_for_package()` for each package, whose job is to
- * second-guess the stored choice and overwrite it with the default when it
- * disagrees -- and on a session that has never served a page load it always
- * disagrees. A pin written first is therefore replaced during the totals by the
- * first rate in the zone, and the session then looks exactly as though the seed
- * had pinned nothing. Nobody can tell those two apart afterwards, this function
- * included, so it reports the method the photograph is going to use and whether
- * anything in the seed is holding it there. Read that line.
+ * second-guess a stored choice, and a session that has never served a page load
+ * looks to it exactly like a shop that has changed under the customer. Measured
+ * rather than assumed: a pin set before the totals is not merely replaced, it is
+ * gone, and the session comes out of them with no stored choice at all. The
+ * browser then picks the first rate in the zone.
+ *
+ * Which leaves a session indistinguishable from one the seed never pinned, so
+ * nothing can tell those two apart afterwards, this function included. It reports
+ * the method the photograph is going to use and whether anything is holding it
+ * there, which is the only honest thing available. Read that line.
  *
  * @param int $user_id The customer the storefront shots are taken as.
  */

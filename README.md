@@ -1039,14 +1039,17 @@ session.
 **Pin after the last `calculate_totals()`, never before it.** Totals do not
 leave a chosen method alone: they ask
 `wc_get_chosen_shipping_method_for_package()` for each package, whose job is to
-second-guess the stored choice and replace it with the default when it
-disagrees, and on a session that has never served a page load it always
-disagrees. A pin written first is replaced during the totals by the first rate
-in the zone, and the session afterwards looks exactly as though the seed had
-pinned nothing at all. Nothing can tell those two apart afterwards, so nothing
-tries: `seed_hand_the_cart_to()` prints the method the photograph is going to
-use and whether anything in the seed is holding it there. That line is the
-check, and it is worth reading.
+second-guess a stored choice, and a session that has never served a page load
+looks to it exactly like a shop that has changed under the customer. Measured on
+WooCommerce 11.1.2 rather than assumed: a pin set before the totals is not
+merely replaced, it is **gone** — the session comes out of them with no stored
+choice at all, and the browser picks the first rate in the zone.
+
+That leaves a session indistinguishable from one the seed never pinned, so
+nothing can tell the two apart afterwards and nothing tries:
+`seed_hand_the_cart_to()` prints the method the photograph is going to use and
+whether anything is holding it there. That line is the check, and it is worth
+reading.
 
 **Three session keys are needed, not one — and this part is done for you.**
 `chosen_shipping_methods` on its own is discarded before it is read, because
