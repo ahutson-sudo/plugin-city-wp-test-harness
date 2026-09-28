@@ -56,9 +56,11 @@ REFUSED = {
         "round it and the crop would be in the wrong place."
     ),
     "stale": (
-        "an allow line in the shot list named a request this page never makes, so "
-        "the check it switches off is switched off for nothing. The fragment is "
-        "written across the top of the raw render: delete that line."
+        "a line in the shot list named something this page has not got. Either an "
+        "allow line excused a request the page never makes, so the check it switches "
+        "off is switched off for nothing, or part of the frame matched nothing, so "
+        "the crop would be narrower than the shot asked for. Which of the two, and "
+        "which fragment, is written across the top of the raw render."
     ),
     "undone": (
         "one of the steps in this shot's click column did not happen, so this is "
@@ -148,9 +150,16 @@ def main() -> int:
     found = masks(im)
 
     if not found:
-        # Almost always a selector that matched nothing, or a subject below the
-        # fold so that no rule was on screen at all.
-        print(f"no frame found in {raw}: check the selector and the height", file=sys.stderr)
+        # A frame whose selectors matched nothing draws a red rule and says so,
+        # so what is left is a rule that was drawn somewhere this render cannot
+        # see it -- a subject below the fold -- or a page that never ran the
+        # shim at all.
+        print(
+            f"no frame found in {raw}: nothing drew a rule. Either the subject is "
+            "below the fold, so raise the height for this shot, or the page did not "
+            "run the shim: look at the raw render and see which screen it is",
+            file=sys.stderr,
+        )
         return 1
 
     # The rule is whichever candidate closes on all four sides. Anything else of

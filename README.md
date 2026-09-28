@@ -492,7 +492,7 @@ One line per shot, tab separated. Blank lines and `#` comments are ignored.
 |---|---|
 | `name` | Output file stem, so `screenshot-1` writes `screenshot-1.png` |
 | `path` | Site-relative, e.g. `/product/a-book/` or `/wp-admin/admin.php?page=my-settings`. May carry `{{kind.key}}` placeholders, and may be prefixed with who is looking |
-| `frame` | CSS selector list. The **union** of every match is what gets cropped to |
+| `frame` | CSS selector list. The **union** of every match is what gets cropped to, and every selector in it has to match something |
 | `click` | What to do before the frame is measured, or `-`. One step, or several separated by `\|`. A step is a selector to click; a step written `selector ::= value` types the value into that field instead |
 | `pad` | Page pixels kept around the subject |
 | `margin` | Flat pixels of page colour added after cropping |
@@ -508,14 +508,26 @@ downsampled is visibly cleaner than its 1x, and the published sets in this range
 are 1x. Deleting the `.resize()` in `scripts/crop-to-frame.py` doubles every
 dimension from the same raw renders, with no recapture.
 
-The whole list is handed to one `querySelectorAll`, so it is the *list* that has
-to match something, not each selector in it. A frame of two selectors where one
-is a typo draws itself from the other and saves a picture that is simply
-narrower than the one asked for, and the run reports nothing. Only a list where
-nothing at all matches refuses the shot.
+**Every selector in the list has to match something with a size**, and one that
+does not refuses the shot and names itself:
 
-Nothing warns you that a frame has quietly got *bigger* either, which with the
-above is the maintenance surface to watch: compare a new capture against the
+```
+part of the frame is not on this page, so the crop would be narrower than the
+shot asked for: ".mypl-settings__heder" matches nothing on this page
+```
+
+It used to be the *list* that had to match, which meant a frame of two selectors
+where one was a typo drew itself from the other and saved a picture simply
+narrower than the one asked for, with nothing said. That is the worst shape a
+fault can take here — a wrong picture at a plausible size — and it is why the
+rule is the strict one. If a frame really does mean "whichever of these the page
+has", say so in the selector with `:is(.new-card, .old-card)`, which is one
+selector and still has to match: a list is not a place to be vague by accident.
+
+An element that is present but measures a pixel or less counts as absent, which
+is the same rule the union is built from, and is said differently so the two are
+not confused. Nothing warns you that a frame has quietly got *bigger*, though,
+so that is the maintenance surface left: compare a new capture against the
 committed one before believing it.
 
 With `pad` at `0` the crop is flush to the subject less the two pixels the rule
@@ -607,13 +619,12 @@ and there are two things to get right in a shot list that does it.
   WordPress and WooCommerce write — comes back with the shot still in progress. A
   form posting somewhere else arrives as a page the shim knows nothing about, and
   the run fails for a missing frame.
-- **The frame should be something that only exists once the screen has
-  answered**, and it has to be the *only* selector in that frame. A shot whose
-  subject cannot be measured is refused, so a frame that is nothing but the
-  answer is a check on the answer having arrived. Added beside a wrapper
-  selector it checks nothing at all: the union takes whichever selectors match
-  and says nothing about the rest, so the wrapper alone draws a picture of the
-  unanswered screen at a plausible size.
+- **The frame should name something that only exists once the screen has
+  answered.** Every selector in a frame has to match, so a frame that includes
+  the answer is a check on the answer having arrived: an unanswered screen has
+  nothing for that selector to find and the shot is refused. It may sit beside a
+  wrapper selector — both have to match — so the frame can be the shape of the
+  picture and the proof at the same time.
 
 Only the last step may submit, and the sequence has to be the whole of what the
 shot does. Following a plain link is refused rather than supported — put its
@@ -640,7 +651,7 @@ table and is the only thing that reads it:
 | green | Something the page needed did not arrive, or a warning would have been left out of the picture |
 | cyan | A request had not answered when the picture was taken |
 | yellow | The subject was still moving when the picture was taken |
-| red | An `allow` line in the shot list describes a request this page never makes |
+| red | The shot list names something this page has not got: an `allow` line for a request it never makes, or a frame selector that matches nothing |
 | blue | A step in the `click` column did not happen, or the form it submitted was turned away |
 
 Five of the six **stop the run**, name the reason, and save nothing. The render
@@ -1277,9 +1288,11 @@ full one.
 Nothing about the symptom says any of that. WordPress deactivates the plugin it
 can no longer find, the capture signs in, wp-admin answers **"Sorry, you are not
 allowed to access this page."** because the settings page it is asking for is not
-registered any more, and the shot is refused for having no frame. The two
-plausible explanations — a broken login shim and a wrong selector — are both
-wrong, and both take a while to rule out. Replace the contents instead:
+registered any more, and the shot is refused for a frame that matched nothing.
+The refusal names the selector, which is the honest thing for it to say and
+points at the wrong culprit here: the selector is right and the screen is not.
+The two plausible explanations — a broken login shim and a wrong selector — are
+both wrong, and both take a while to rule out. Replace the contents instead:
 
 ```bash
 find "$PLUGIN_PATH" -mindepth 1 -delete

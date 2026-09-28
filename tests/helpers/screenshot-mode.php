@@ -60,11 +60,13 @@ const PC_SHOT_NOBODY = 'visitor';
  *
  * There are six colours and no seventh available -- a channel is either up or
  * down, because a mid value cannot be told from the antialiasing on a fractional
- * edge, and of the eight corners white and black are drawn by everything. So
- * green carries more than one reason: a request or an image that did not arrive,
- * and a warning that would have been left out of the picture. The sentences
- * printed across the top of the render are what tell them apart, which is the
- * same way the other refusals are read.
+ * edge, and of the eight corners white and black are drawn by everything. So two
+ * of them carry more than one reason. Green is a request or an image that did
+ * not arrive, and a warning that would have been left out of the picture; red is
+ * anything in the shot list that names something this page has not got, which is
+ * an allow line for a request nobody makes and a frame selector that matches
+ * nothing. The sentences printed across the top of the render are what tell them
+ * apart, which is the same way the other refusals are read.
  *
  * All six are colours nothing in wp-admin, in a block theme or in WooCommerce
  * draws, which is the only property they need.
@@ -766,9 +768,15 @@ function pc_shot_steps( string $click ): array {
  * turned away on a POST is a refusal too -- see pc_shot_refused_nonces().
  *
  * Neither of those can tell that the answer a screen gave is the answer the shot
- * was after, and nothing here can. What does is the frame: a shot whose subject
- * includes something that only exists once the screen has answered is checked by
- * the selector matching, which is already a refusal when it does not.
+ * was after, and nothing here can. What does is the frame: every selector in one
+ * has to match something with a size, so a subject naming a part of the screen
+ * that only exists once the screen has answered is a check on the answer having
+ * arrived. That is worth only as much as the requirement behind it, and the
+ * requirement used to be the other way round -- the whole list was handed to one
+ * querySelectorAll, so a frame of two selectors where one matched nothing drew
+ * itself from the other and saved a picture that was simply narrower than the
+ * one asked for. Nothing was refused and nothing was said, which is the worst
+ * shape a fault can take here: a wrong picture at a plausible size.
  *
  * pc_frame exists because the crop is the part of this job most easily got
  * wrong by hand: a box read off a preview is out by a few pixels, and the
@@ -964,11 +972,66 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 					{childList:true,subtree:true,attributes:true,characterData:true});
 			}
 			var giveUpAt=Date.now()+6000;
+			/* A frame is a selector list, and the pieces of it have to be asked
+			   about one at a time, because the union cannot say which of them it
+			   came from. Split at the top level only: a comma inside [a="x,y"],
+			   :is(), :not() or :nth-child() belongs to the selector it sits in,
+			   and cutting one there would leave two halves matching nothing --
+			   the very fault this is here to find, introduced by the check for
+			   it. */
+			function pieces(list){
+				var out=[], at=0, depth=0, quote="";
+				for(var i=0;i<list.length;i++){
+					var c=list.charAt(i);
+					if(quote){
+						if("\\\\"===c){ i++; }
+						else if(c===quote){ quote=""; }
+						continue;
+					}
+					if("\\""===c||"\'"===c){ quote=c; continue; }
+					if("("===c||"["===c){ depth++; continue; }
+					if(")"===c||"]"===c){ if(depth>0){ depth--; } continue; }
+					if(","===c&&0===depth){ out.push(list.slice(at,i)); at=i+1; }
+				}
+				out.push(list.slice(at));
+				return out.map(function(s){ return s.trim(); })
+					.filter(function(s){ return ""!==s; });
+			}
+			/* Which parts of the frame are not on this page, said one part at a
+			   time so the sentence can name the selector rather than the list.
+
+			   Judged by the same rule the union is built from, so that a
+			   selector matching only something with no size counts as absent: it
+			   contributes nothing to the box either way, and the picture that
+			   comes out is the narrow one. It is said differently, because an
+			   element that is present and flat is a different thing to go and
+			   look at from a name that is not in the document at all. */
+			function absent(){
+				return pieces(frame).map(function(s){
+					var found;
+					try{ found=document.querySelectorAll(s); }
+					catch(e){ return JSON.stringify(s)+" is not a selector the browser understands"; }
+					for(var i=0;i<found.length;i++){
+						var b=found[i].getBoundingClientRect();
+						if(b.width>1&&b.height>1){ return ""; }
+					}
+					return found.length
+						?JSON.stringify(s)+" matches "+found.length+" element(s) here, none of which has a size"
+						:JSON.stringify(s)+" matches nothing on this page";
+				}).filter(function(m){ return ""!==m; });
+			}
+			/* Somewhere legible to put a rule when there is no subject to put
+			   one round, so that the reason still reaches the picture. */
+			function nowhere(){
+				return {left:8,top:240,right:Math.min(608,(window.innerWidth||800)-8),bottom:400};
+			}
 			function measure(){
 				/* The union of every match, not the first: wp-admin lays its
 				   columns out with floats, so the wrapper that looks like the
 				   subject measures a few pixels high and a frame round it
-				   photographs a strip of nothing. */
+				   photographs a strip of nothing. The union is over whatever
+				   matched; whether everything in the list did is a separate
+				   question, asked by absent() and answered as a refusal. */
 				var all=[].slice.call(document.querySelectorAll(frame)).map(function(n){
 					return n.getBoundingClientRect();
 				}).filter(function(b){ return b.width>1 && b.height>1; });
@@ -991,7 +1054,10 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 				if(report){ return "undone"; }
 				if(w.failed.length||strayed){ return "failed"; }
 				if(w.inflight>0||waiting()>0){ return "pending"; }
-				return unused().length?"stale":"ok";
+				/* Asked after the page has settled, and not before: a card the
+				   screen draws for itself is missing for a moment on every run,
+				   and refusing on that would refuse everything. */
+				return (unused().length||absent().length)?"stale":"ok";
 			}
 			function why(){
 				return steady>=2?whyNow():"moved";
@@ -1003,7 +1069,8 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 				if("pending"===v&&w.inflight>0){ lines.push(w.inflight+" request(s) had not answered when the picture was taken"); }
 				if("pending"===v&&waiting()>0){ lines.push(waiting()+" image(s) had not arrived when the picture was taken"); }
 				if("moved"===v){ lines.push("the subject was still moving when the picture was taken"); }
-				if("stale"===v){ lines.push("nothing on this page asked for: "+unused().join(", ")); }
+				if("stale"===v&&unused().length){ lines.push("nothing on this page asked for: "+unused().join(", ")); }
+				if("stale"===v&&absent().length){ lines.push("part of the frame is not on this page, so the crop would be narrower than the shot asked for: "+absent().join("; ")); }
 				var note=document.getElementById("pc-shot-why");
 				if(!note){
 					note=document.createElement("div");
@@ -1053,7 +1120,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 				   be the one thing here that is right. */
 				if(report){
 					if(drawn){ return; }
-					drawn=here||{left:8,top:240,right:Math.min(608,(window.innerWidth||800)-8),bottom:400};
+					drawn=here||nowhere();
 					verdict="undone";
 					if(watching){ watching.disconnect(); watching=null; }
 					draw(drawn,verdict);
@@ -1064,10 +1131,19 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 					last=here;
 					var ready=here&&steady>=2&&w.inflight===0&&waiting()===0&&(now-touched)>=250;
 					if(!ready&&now<giveUpAt){ return; }
-					/* Nothing is drawn when the selector matched nothing: a
-					   missing rule is the cropper telling you about the
-					   selector, and a rule round nowhere would not be. */
-					if(!here){ return; }
+					/* Nothing in the frame matched anything, so there is no
+					   subject to draw a rule round. It goes on a rectangle of
+					   its own rather than being left out: a render with no rule
+					   at all leaves the cropper choosing between a frame that
+					   named the wrong thing and a subject below the fold, and
+					   only the page knows which of those it was. */
+					if(!here){
+						drawn=nowhere();
+						verdict="stale";
+						if(watching){ watching.disconnect(); watching=null; }
+						draw(drawn,verdict);
+						return;
+					}
 					strayed=outside(here);
 					verdict=why();
 					drawn=here;
