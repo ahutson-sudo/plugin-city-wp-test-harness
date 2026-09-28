@@ -21,6 +21,11 @@ jobs:
       - name: Prove the image fetch retries, and only where it should
         run: ./tests/host/pull-retry.sh
 
+      # The sentence this asserts on is the whole of a fix, and a sentence that
+      # has stopped printing is indistinguishable from one nobody needed.
+      - name: Prove a container path for the shot list says so
+        run: ./tests/host/shot-list-path.sh
+
   fixture:
     runs-on: ubuntu-latest
     steps:
