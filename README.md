@@ -747,6 +747,41 @@ and refuses the shot, because an exception that has stopped applying is a hole i
 the check that nobody knows is open. An `allow` line naming a shot that is not in
 the list stops the run before anything is rendered.
 
+### Photographing two editions in one container
+
+A plugin sold as a free build and a paid one needs both photographed, and the paid
+build is usually the free build with a directory added to it. So the cheap way is
+one container: mount a stable directory, put the free build's contents in it,
+capture, then replace the contents with the paid build's and capture again. That
+works, and both of the things that go wrong the first time go wrong quietly enough
+to be worth writing down.
+
+**Swap the contents, not the directory.** A bind mount resolves to an inode, so
+deleting the mounted directory and putting a new one in its place leaves the
+container looking at something that no longer has a name. Empty the directory and
+copy into it.
+
+**Then make the container read the new files.** PHP keeps compiled scripts, and the
+file a swap most needs re-read is the plugin's main file — which in this
+arrangement is the one that differs, because the line loading the paid directory is
+in it and in nothing else. Leave the process as it is and the paid classes are
+absent from every web request while `wp` sees all of them, because the CLI is a
+separate process with a cache of its own. What that looks like from here is a paid
+feature that reports itself switched on from the command line and is simply not on
+the page, which reads as a bug in the plugin. Restart the web container after the
+swap and wait for the site to answer before going on.
+
+**And check what an edition's own licensing wants done before its settings are
+written.** This is not the harness's business, but it is the harness that finds
+out: a paid build with no licence key typically grants itself a grace period from
+the moment it records having been installed, and a build asked to decide whether a
+missing record means "never run here" or "record deleted to ask for a second
+grace" will go by whether its own options are already in the database. Seed the
+paid settings first and the grace is spent before it starts. Every paid feature
+then denies, and the first thing to say so is a frame selector matching nothing.
+Whatever writes that record — activating the plugin with the paid directory in
+place, or a first admin request — belongs before the seed rather than after it.
+
 ### What makes a capture reproducible
 
 Three things the driver does that only make sense once you have seen a set fail to
