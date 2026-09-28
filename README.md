@@ -441,10 +441,10 @@ PLUGIN_PATH=../my-plugin PLUGIN_SLUG=my-plugin ./scripts/install.sh
 
 # Build the shop. The seed belongs to the plugin; see below.
 ./scripts/wp.sh eval-file \
-  /var/www/html/wp-content/plugins/my-plugin/.screenshots/seed.php
+  /var/www/html/wp-content/plugins/my-plugin/tests/screenshots/seed.php
 
-./scripts/screenshot.sh ../my-plugin/.screenshots/shots.tsv dist/screenshots
-python3 scripts/contact-sheet.py ../my-plugin/.screenshots/shots.tsv dist/screenshots
+./scripts/screenshot.sh ../my-plugin/tests/screenshots/shots.tsv dist/screenshots
+python3 scripts/contact-sheet.py ../my-plugin/tests/screenshots/shots.tsv dist/screenshots
 ```
 
 Two of those files belong to the plugin and not to the harness, because both are
@@ -454,20 +454,35 @@ otherwise have to be worked out once per product lives here.
 `examples/screenshots.tsv` is a worked shot list, kept as the format's
 documentation.
 
-Where in the plugin's repository they live is the plugin's decision, and the one
-above — inside the plugin folder, so `eval-file` can reach it through the mount —
-is the convenient answer rather than the safe one. Two things to check before
-copying it:
+Where in the plugin's repository they live is the plugin's decision.
+`tests/screenshots/` is what the plugins written against this harness use, so it
+is worth copying for the ordinary reason that a reader of a second plugin then
+already knows where to look. It is a convention and not a requirement — every
+path is passed in, so nothing here assumes one.
 
-- **Whatever builds the plugin's release archive has to be excluding the folder.**
-  A build that only skips `tests/` and `node_modules/` will happily ship
-  `.screenshots/` to WordPress.org, product photographs and all. Putting the
-  folder at the repository root instead, beside the plugin folder, makes that
-  impossible rather than configured.
+The example above puts it inside the plugin folder, which is the arrangement
+`eval-file` can reach through the mount. Three things to weigh before copying
+that part:
+
+- **Whether the folder ships is decided by the plugin's build, and only the
+  built archive can tell you.** An exclusion list catches the directory names
+  somebody thought of and nothing else; a build that refuses hidden paths
+  outright turns a dot-directory into a failed build rather than a leak. So the
+  name the folder is given, and whether it begins with a dot, decide nothing on
+  their own. Read the release instead: `unzip -l` the archive and look for the
+  seed.
+- **A kit that drives more than one edition belongs to the repository rather
+  than to a plugin folder.** Once it resets the database, builds the archives
+  and photographs whichever edition it is told to, putting it inside one plugin
+  folder makes that plugin the owner of the tooling that publishes the other.
+  The repository root is the honest home for it, and the folder is then outside
+  every build by construction rather than by exclusion.
 - **A set photographed from a built archive is not in the mount at all**, which is
   the arrangement to prefer: the pictures are then of the plugin a shop installs
   rather than of a working tree with test files in it. Mount the extracted build
   as `PLUGIN_PATH` and `docker cp` the seed into the container before running it.
+  A kit at the repository root has to do this anyway, since nothing outside the
+  plugin folder is mounted.
 
 ### The shot list
 
@@ -493,9 +508,15 @@ downsampled is visibly cleaner than its 1x, and the published sets in this range
 are 1x. Deleting the `.resize()` in `scripts/crop-to-frame.py` doubles every
 dimension from the same raw renders, with no recapture.
 
-A selector that matches nothing fails the run. Nothing warns you that a frame has
-quietly got *bigger*, which is the maintenance surface to watch: compare a new
-capture against the committed one before believing it.
+The whole list is handed to one `querySelectorAll`, so it is the *list* that has
+to match something, not each selector in it. A frame of two selectors where one
+is a typo draws itself from the other and saves a picture that is simply
+narrower than the one asked for, and the run reports nothing. Only a list where
+nothing at all matches refuses the shot.
+
+Nothing warns you that a frame has quietly got *bigger* either, which with the
+above is the maintenance surface to watch: compare a new capture against the
+committed one before believing it.
 
 With `pad` at `0` the crop is flush to the subject less the two pixels the rule
 itself occupies, so a subject whose own border is part of the picture wants
@@ -586,10 +607,13 @@ and there are two things to get right in a shot list that does it.
   WordPress and WooCommerce write — comes back with the shot still in progress. A
   form posting somewhere else arrives as a page the shim knows nothing about, and
   the run fails for a missing frame.
-- **The `frame` should include something that only exists once the screen has
-  answered.** That is the only check that can tell the answer apart from the
-  absence of one, and it comes for free: a selector matching nothing already
-  fails the run.
+- **The frame should be something that only exists once the screen has
+  answered**, and it has to be the *only* selector in that frame. A shot whose
+  subject cannot be measured is refused, so a frame that is nothing but the
+  answer is a check on the answer having arrived. Added beside a wrapper
+  selector it checks nothing at all: the union takes whichever selectors match
+  and says nothing about the rest, so the wrapper alone draws a picture of the
+  unanswered screen at a plausible size.
 
 Only the last step may submit, and the sequence has to be the whole of what the
 shot does. Following a plain link is refused rather than supported — put its
