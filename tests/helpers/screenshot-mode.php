@@ -487,15 +487,56 @@ function pc_shot_swallowed_warnings( ?string $html = null ): array {
 		return array_keys( $said );
 	}
 
-	if ( 1 === preg_match( '/class="[^"]*\b(?:notice-warning|notice-error|woocommerce-error)\b/', $html ) ) {
-		$sentence = trim( (string) preg_replace( '/\s+/', ' ', wp_strip_all_tags( $html ) ) );
+	if ( ! pc_shot_reads_as_a_warning( $html ) ) {
+		return array_keys( $said );
+	}
 
-		if ( '' !== $sentence ) {
-			$said[ pc_shot_shorten( $sentence ) ] = true;
-		}
+	$sentence = trim( (string) preg_replace( '/\s+/', ' ', wp_strip_all_tags( $html ) ) );
+
+	if ( '' !== $sentence ) {
+		$said[ pc_shot_shorten( $sentence ) ] = true;
 	}
 
 	return array_keys( $said );
+}
+
+/**
+ * Whether any element in some markup is dressed as a warning or an error.
+ *
+ * Read a class attribute at a time and a word at a time rather than with one
+ * pattern over the whole string, because the order of the words in a class
+ * attribute is nobody's promise: WordPress writes "notice error" and a plugin
+ * may as easily write "error notice", and a pattern that reads left to right
+ * agrees with whichever one it was written against.
+ *
+ * "notice error" is WordPress before the severity classes existed and is still
+ * everywhere, so it counts. A bare "error" does not: it is a class that dresses
+ * a field, a row and a span in markup that has nothing to do with notices, and
+ * a check that fires on all of those is a check somebody switches off.
+ *
+ * @param string $html Markup to read.
+ */
+function pc_shot_reads_as_a_warning( string $html ): bool {
+	if ( ! preg_match_all( '/class="([^"]*)"/', $html, $found ) ) {
+		return false;
+	}
+
+	$severe = array( 'notice-warning', 'notice-error', 'woocommerce-error' );
+
+	foreach ( $found[1] as $classes ) {
+		$words = preg_split( '/\s+/', trim( $classes ) );
+		$words = is_array( $words ) ? $words : array();
+
+		if ( array() !== array_intersect( $words, $severe ) ) {
+			return true;
+		}
+
+		if ( in_array( 'notice', $words, true ) && in_array( 'error', $words, true ) ) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /**
@@ -895,7 +936,7 @@ function pc_shot_print_script( string $click, string $frame, int $pad, bool $pos
 
 			   Fully inside, not overlapping. Half a warning is worse than none:
 			   it looks deliberate. */
-			var WARNED=".notice-warning,.notice-error,.woocommerce-error,"
+			var WARNED=".notice-warning,.notice-error,.notice.error,.woocommerce-error,"
 				+".wc-block-components-notice-banner.is-error,"
 				+".wc-block-components-notice-banner.is-warning";
 			function outside(box){
