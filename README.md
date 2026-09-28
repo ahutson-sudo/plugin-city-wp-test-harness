@@ -1242,6 +1242,30 @@ symptom is `pc_compose ps -q wordpress` coming back empty, or an install that
 reports success against a stack you are not looking at. `unset HARNESS_ROOT
 COMPOSE_PROJECT_NAME` first, or use a new shell.
 
+**Swap a plugin's *contents*, never the directory itself.** `PLUGIN_PATH` is bind
+mounted into the container, and a bind mount is resolved once, to an inode. Delete
+the directory and put another one back under the same name — which is what
+`rm -rf` then `cp -r` does, and the obvious way to photograph a second edition
+without restarting anything — and the mount still points at the inode that was
+unlinked. The container then sees an empty plugin folder while the host shows a
+full one.
+
+Nothing about the symptom says any of that. WordPress deactivates the plugin it
+can no longer find, the capture signs in, wp-admin answers **"Sorry, you are not
+allowed to access this page."** because the settings page it is asking for is not
+registered any more, and the shot is refused for having no frame. The two
+plausible explanations — a broken login shim and a wrong selector — are both
+wrong, and both take a while to rule out. Replace the contents instead:
+
+```bash
+find "$PLUGIN_PATH" -mindepth 1 -delete
+cp -r /path/to/other-edition/. "$PLUGIN_PATH"/
+```
+
+If it has already happened, `./scripts/stop.sh` and `./scripts/start.sh` rebind
+the mount. The rejected render the capture leaves behind is what names it: it is a
+picture of the "not allowed" page rather than of a plugin screen.
+
 ## GitHub Actions
 
 GitHub-hosted runners already have Docker, so plugin CI does not need Docker Desktop.
