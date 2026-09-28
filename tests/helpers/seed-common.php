@@ -423,12 +423,25 @@ function seed_settle_the_delivery_method(): void {
 		}
 
 		if ( '' === $stored ) {
+			// Reachable, and the case a seed most needs telling about: a cart can
+			// come out of the totals with rates on offer and nothing stored at all,
+			// so the browser chooses on its first page load and the seed has no say.
+			$report[] = ( '' === $default ? 'nothing stored and nothing to choose' : $default . ', which nothing has stored -- the browser will choose it on the first page load, being the first rate in the zone that is not collection' );
+
 			continue;
 		}
 
+		/*
+		 * Said in terms that are true either way, because the two cases cannot be
+		 * told apart from here: a seed that pinned nothing, and a seed whose pin
+		 * was replaced during the totals, both leave the default sitting in the
+		 * session -- and so does a seed that pinned the default on purpose. What
+		 * can be said of all three is that the picture does not depend on the
+		 * choice, which is the part worth knowing.
+		 */
 		$report[] = $stored === $default
-			? $stored . ', which is what WooCommerce picks for itself -- the first rate in the zone that is not collection, so it moves if the zone is reordered and nothing in the seed is asking for it'
-			: $stored . ', as the seed asked';
+			? $stored . '. That is also the rate WooCommerce picks unasked -- the first in the zone that is not collection -- so this picture does not depend on any choice being stored, and it moves if the zone is reordered'
+			: $stored . ', chosen over WooCommerce\'s own ' . ( '' === $default ? 'default' : $default );
 	}
 
 	WC()->session->set( 'previous_shipping_methods', $offered );
