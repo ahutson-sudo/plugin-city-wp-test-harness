@@ -955,6 +955,22 @@ happen to cost, and a session row written by an earlier run is read in
 preference to anything this one did — so a set can come back byte for byte
 identical twice over and still be of a state no seed ever asked for.
 
+Nor does that row stay wrong in the same way, because what it names is
+renumbered. A chosen method is stored as a kind and an instance — `flat_rate:7`
+— and the instance id is minted when the method is added to a zone, so a shop
+rebuilt from empty gives the same van a different number. While the numbers
+still match, every run agrees with the first and all of them are wrong together.
+Once the zones are rebuilt the row names a rate the shop no longer has,
+WooCommerce falls back to choosing for itself, and the same shot list produces a
+different picture with nothing in the code having changed. That is what turns a
+reliably wrong picture into an occasionally wrong one, and an occasionally wrong
+picture is the one that gets past being looked at.
+
+So the only reproduction check that means anything here starts from an empty
+shop in a fresh container. Re-running a capture against the shop that is already
+there compares the leftover row with itself, and will report byte-for-byte
+agreement however wrong the subject of the picture is.
+
 ### A fourth that does not look like anything at all
 
 The three above cost time because they look like a fault. This one costs more

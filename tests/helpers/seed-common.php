@@ -211,6 +211,19 @@ function seed_tidy_the_front_of_the_site(): void {
  * is read in preference to anything this one did, so a set can come back
  * identical twice and still be of a state the seed never asked for.
  *
+ * Nor does it stay wrong in the same way, because what the row names is
+ * renumbered. A chosen method is stored as a kind and an instance --
+ * `flat_rate:7` -- and the instance id is minted when the method is added to a
+ * zone, so a shop rebuilt from empty gives the same van a different number.
+ * While the numbers still match, every run agrees with the first and all of
+ * them are wrong together; once the zones are rebuilt the row names a rate that
+ * no longer exists, WooCommerce chooses for itself again, and the same shot list
+ * photographs something else with nothing in the code having changed. That is
+ * what turns a reliably wrong picture into an occasionally wrong one, and the
+ * occasional one is what survives being looked at. So a reproduction check only
+ * means anything from an empty shop: re-run against the shop already there, it
+ * compares the leftover row with itself.
+ *
  * @param int $user_id The customer the storefront shots are taken as.
  */
 function seed_hand_the_cart_to( int $user_id ): void {
