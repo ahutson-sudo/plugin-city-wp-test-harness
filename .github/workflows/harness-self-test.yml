@@ -10,10 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install zsh and Subversion
+        run: sudo apt-get update && sudo apt-get install -y zsh subversion
+
       - name: Syntax-check scripts and PHP
         run: |
           set -euo pipefail
           for f in scripts/*.sh tests/host/*.sh; do bash -n "$f"; done
+          for f in scripts/*.template.zsh; do zsh -n "$f"; done
           find . -name '*.php' -print0 | xargs -0 -n1 php -l
 
       # A retry nobody has watched retry is a retry that might not. This starts
@@ -25,6 +29,14 @@ jobs:
       # has stopped printing is indistinguishable from one nobody needed.
       - name: Prove a container path for the shot list says so
         run: ./tests/host/shot-list-path.sh
+
+      # A release gate nobody has watched refuse is a gate that might not. This
+      # asserts that each check refuses its OWN fault — a refusal by a
+      # neighbouring check is how a dead check hides — and fails while any check
+      # has no fault behind it. Builds its own Subversion repository over
+      # file://, so it needs no network and no plugin.
+      - name: Prove the first-release check refuses each fault it exists for
+        run: ./tests/host/first-release-check.sh
 
   fixture:
     runs-on: ubuntu-latest
