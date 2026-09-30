@@ -1557,11 +1557,12 @@ Subversion repository built from nothing over `file://`, which is also the only
 way to cover a plugin whose repository does not exist yet — every plugin before
 its submission is approved.
 
-It asserts three things:
+It asserts four things:
 
 1. A correctly staged release passes.
 2. Each fault is refused **by the check named for it**, not merely refused.
-3. **Coverage** — it fails while any failable check has no fault behind it, so a check cannot be added with nothing proving it works. Checks that are deliberately informational are declared as such, so the exemption is visible rather than silent. An id used in the code but missing from the declaration is a hard error.
+3. Each shape that is known to be legitimate is **accepted**, named as its own case rather than left to the baseline. A gate that refuses a clean package is worse than no gate, because it is the one people learn to skip past — and the domain check did exactly that on Order Cancellation's package, four times, while the package was correct. It was a line-based grep, so a call whose arguments ran over several lines and a docblock writing `__()` in prose both read as faults. It now lexes each file and reads each call whole; the three cases under "these are not faults" fail against the old version and pass against this one.
+4. **Coverage** — it fails while any failable check has no fault behind it, so a check cannot be added with nothing proving it works. Checks that are deliberately informational are declared as such, so the exemption is visible rather than silent. An id used in the code but missing from the declaration is a hard error.
 
 The gate and the generator are themselves tested: a check declared with no fault
 must be reported, and a bad slug or version must be refused with no file written.
@@ -1570,6 +1571,7 @@ must be reported, and a bad slug or version must be refused with no file written
 
 - **Not sufficiency.** Coverage accounting closes the gap between the checks and the faults, not the gap to the mistake nobody has imagined. The table should grow from real incidents — which is why the two faults that actually bit this range, a caption for a screen that does not exist and a plugin inside a wrapping folder, are worth more in it than any invented one.
 - **It does not transfer to the stable-tag guard in the plugin repositories.** That one runs in CI against a repository; this runs against a Subversion working copy. The *method* transfers — build the fixture, inject the fault, assert the specific refusal, account for the coverage — and the method is what "nothing proves its check works" is asking for. The script does not.
+- **The domain scan is a lexer, not PHP.** It reads an i18n call nested inside another i18n call as the outer call alone, so a wrong domain on the inner one is seen only if the outer one is wrong too. Sequential calls are read separately, which is the shape that occurs. A call left unterminated at the end of a file is reported rather than dropped, because silence there would read as a clean file.
 
 ### Images, and what a text check cannot see
 

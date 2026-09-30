@@ -115,6 +115,42 @@ expect_refusal() {
   while read -r id; do [[ -n "$id" ]] && COVERED+=("$id"); done <<< "$got"
 }
 
+# The other half of a gate's honesty, and the half this suite did not have.
+#
+# Every case above asks "does it refuse the fault?". None asked "does it accept
+# what is not a fault?", and the answer turned out to be no: the domain check
+# was a line-based grep, so a call whose arguments ran over several lines and a
+# docblock that wrote __() in prose both read as faults. Order Cancellation's
+# package tripped it four times while being entirely correct.
+#
+# A gate that refuses a clean package is worse than no gate, because it is the
+# gate somebody learns to skip past — so a shape known to be legitimate gets a
+# case of its own here, named, rather than living unremarked in the baseline
+# where its removal would be invisible.
+expect_no_refusal() {
+  local name="$1" fn="$2" shots="${3:-$SHOTS}"
+  local dir="${SCRATCH}/ok-$(printf '%s' "$name" | tr -cd 'a-z0-9')"
+  build "$dir" "$shots"
+
+  local applied=0
+  ( cd "${FIXTURE_WC}" && "$fn" ) || applied=$?
+  if (( applied != 0 )); then
+    printf '  SUITE    %-34s change could not be applied (status %s)\n' "$name" "$applied"
+    failures=$(( failures + 1 ))
+    return
+  fi
+
+  local out; out="$(run_check)"
+  if printf '%s\n' "$out" | grep -q '^PASS'; then
+    printf '  ok       %-34s accepted, as it should be\n' "$name"
+  else
+    printf '  FALSE    %-34s refused something that is not a fault, by [%s]\n' \
+      "$name" "$(ids_in "$out" | tr '\n' ' ' | sed 's/ $//')"
+    printf '           a gate that refuses a clean package is one people skip past\n'
+    failures=$(( failures + 1 ))
+  fi
+}
+
 # --- section 1
 f_url() { :; }   # handled specially below
 
@@ -140,6 +176,69 @@ f_tagdiff() { printf '\nAn extra line only in trunk.\n' >> trunk/readme.txt; }
 # --- section 5: the text domain
 f_domain()      { sed -i.bak "s/ \* Text Domain: ${SLUG}/ * Text Domain: fixture-plugin/" "trunk/${SLUG}.php" && rm -f "trunk/${SLUG}.php.bak"; }
 f_domain_code() { sed -i.bak "s/'A fixture notice.', '${SLUG}'/'A fixture notice.', 'fixture-plugin'/" trunk/includes/bootstrap.php && rm -f trunk/includes/bootstrap.php.bak; }
+
+# Adding code to trunk alone makes the tag differ from it, which TAGDIFF is
+# right to refuse — so a case about the domain check has to add it to both or it
+# is measuring the wrong thing.
+append_both() {
+  local rel="$1" body; body="$(cat)"
+  printf '%s\n' "$body" >> "trunk/${rel}"
+  printf '%s\n' "$body" >> "tags/${VER}/${rel}"
+}
+
+# The same fault written the way the range actually writes a long string: the
+# call over three lines, with the domain on its own. It has to be found there
+# too, or the lexer has only moved the blind spot rather than closed it.
+f_domain_code_multiline() {
+  append_both includes/bootstrap.php <<'PHP'
+
+function pcfx_long(): string {
+	return __(
+		'A sentence long enough that the domain goes on a line of its own.',
+		'fixture-plugin'
+	);
+}
+PHP
+}
+
+# --- section 5: three shapes that are legitimate and used to be refused
+o_multiline_domain() {
+  append_both includes/bootstrap.php <<PHP
+
+function pcfx_multiline(): string {
+	return __(
+		'A sentence long enough that the domain goes on a line of its own.',
+		'${SLUG}'
+	);
+}
+PHP
+}
+
+o_docblock_prose() {
+  append_both includes/bootstrap.php <<'PHP'
+
+/**
+ * The defaults are not constants: they go through __() so a translation can
+ * carry them, and a const cannot.
+ */
+function pcfx_documented(): string {
+	// Wording goes through __() rather than being concatenated.
+	return 'not translatable, and not claiming to be';
+}
+PHP
+}
+
+o_heredoc_text() {
+  append_both includes/bootstrap.php <<'PHP'
+
+function pcfx_heredoc(): string {
+	return <<<'GUIDE'
+	Wrap every customer-facing sentence in __( 'text', 'your-domain' ) before
+	shipping it, or it can never be translated.
+	GUIDE;
+}
+PHP
+}
 f_domain_load() { sed -i.bak "s/^\t\t'${SLUG}',/\t\t'fixture-plugin',/" trunk/includes/bootstrap.php && rm -f trunk/includes/bootstrap.php.bak; }
 f_pot()         { svn revert -q "trunk/languages/${SLUG}.pot" && rm -f "trunk/languages/${SLUG}.pot"; }
 f_pot_domain()  { sed -i.bak "s/X-Domain: ${SLUG}/X-Domain: fixture-plugin/" "trunk/languages/${SLUG}.pot" && rm -f "trunk/languages/${SLUG}.pot.bak"; }
@@ -210,6 +309,7 @@ expect_refusal "readme.txt missing"                README       f_readme
 expect_refusal "trunk and the tag differ"          TAGDIFF      f_tagdiff
 expect_refusal "text domain is not the slug"       DOMAIN       f_domain
 expect_refusal "a string names another domain"     DOMAIN-CODE  f_domain_code
+expect_refusal "a multi-line call names another"   DOMAIN-CODE  f_domain_code_multiline
 expect_refusal "textdomain loader names another"   DOMAIN-LOAD  f_domain_load
 expect_refusal "translation template missing"      POT          f_pot
 expect_refusal "template X-Domain is wrong"        POT-DOMAIN   f_pot_domain
@@ -221,6 +321,11 @@ expect_refusal "banner is not the size it claims"  ART-SIZE     f_art_size
 expect_refusal "sterling in the readme"            GBP          f_gbp
 expect_refusal "a picture changed after it was read" ATTEST     f_attest
 expect_refusal "vendor/ riding along in trunk"     DEVFILES     f_devfiles
+
+printf '\nAnd these are not faults, so they must be accepted:\n'
+expect_no_refusal "a call with the domain a line down"  o_multiline_domain
+expect_no_refusal "a docblock writing __() in prose"    o_docblock_prose
+expect_no_refusal "a nowdoc quoting __() as text"       o_heredoc_text
 
 # ------------------------------------------------------- the coverage gate
 printf '\nCoverage — every failable check must have a fault behind it:\n'
