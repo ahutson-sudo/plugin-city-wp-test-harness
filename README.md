@@ -1504,9 +1504,96 @@ CI never sets the flag, which is why a failure like this reads as a local machin
 problem — the same commit is green on a runner and red here. It is not the
 machine. Before believing that a run differs from CI, run it the way CI does.
 
+## First-release check for WordPress.org SVN
+
+A separate, Docker-free tool. A plugin's **first** SVN commit has three parts that
+go up together — the plugin in `trunk/`, the pinned copy in `tags/<version>/`, and
+the banner, icon and screenshots in `assets/` — and the pictures live outside the
+plugin, so they are the ones a first release forgets. Commit the readme without
+them and the listing shows captions for images that are not there.
+
+`scripts/make-first-release-check.sh` emits a **standalone** check script for one
+plugin:
+
+```bash
+scripts/make-first-release-check.sh \
+  --slug plugincity-product-expiry-dates \
+  --version 1.0.0 \
+  --working-copy ~/Desktop/plugincity-product-expiry-dates-svn \
+  --product "Product Expiry Dates" \
+  --attestation ~/Desktop/plugincity-product-expiry-dates-svn-IMAGES-READ.txt \
+  --output ~/Desktop/plugincity-product-expiry-dates-svn-CHECK-FIRST.command
+```
+
+The emitted file is double-clickable on macOS, writes nothing, commits nothing,
+and prints `PASS` or `STOP`. It is deliberately **generated rather than sourced**
+from a library: it runs on one Mac at the moment of a release, so the first moved
+path must not become an undebuggable double-click failure.
+
+The `--slug` is the WordPress.org directory slug **as granted**. It is not
+derivable from the repository name and is not known until a submission is
+approved, which is why it is an argument. It is also the string the plugin's text
+domain has to equal — WordPress.org matches language packs on the directory slug,
+so a text domain that differs is never matched and nothing reports it.
+
+### Why it names the check that refused
+
+Every `**` line carries a stable check id, and `--list-checks` prints every check
+the script can fail. This is not decoration. When the first version of this suite
+was built by hand, three of its eight faults tripped two or three sections at
+once while the suite only grepped for `STOP` — so a dead check could pass by
+having a neighbour fire for it. That is the vacuous-guard condition, and it was
+invisible until somebody looked.
+
+### Proving it refuses
+
+```bash
+./tests/host/first-release-check.sh
+```
+
+Runs in the `lint` job. Needs `svn`, `svnadmin`, `zsh`, `python3` and `shasum`,
+and **no** network, Docker, plugin or WordPress.org account: the fixture is a
+Subversion repository built from nothing over `file://`, which is also the only
+way to cover a plugin whose repository does not exist yet — every plugin before
+its submission is approved.
+
+It asserts three things:
+
+1. A correctly staged release passes.
+2. Each fault is refused **by the check named for it**, not merely refused.
+3. **Coverage** — it fails while any failable check has no fault behind it, so a check cannot be added with nothing proving it works. Checks that are deliberately informational are declared as such, so the exemption is visible rather than silent. An id used in the code but missing from the declaration is a hard error.
+
+The gate and the generator are themselves tested: a check declared with no fault
+must be reported, and a bad slug or version must be refused with no file written.
+
+### What this does not prove
+
+- **Not sufficiency.** Coverage accounting closes the gap between the checks and the faults, not the gap to the mistake nobody has imagined. The table should grow from real incidents — which is why the two faults that actually bit this range, a caption for a screen that does not exist and a plugin inside a wrapping folder, are worth more in it than any invented one.
+- **It does not transfer to the stable-tag guard in the plugin repositories.** That one runs in CI against a repository; this runs against a Subversion working copy. The *method* transfers — build the fixture, inject the fault, assert the specific refusal, account for the coverage — and the method is what "nothing proves its check works" is asking for. The script does not.
+
+### Images, and what a text check cannot see
+
+The script reads text. It cannot see what is in a picture, so it does not claim
+to. An earlier hand-written version printed "the six pictures were opened and
+read: all dollars" — true of that product, and a false assurance the moment the
+script was reused, inside the very section headed "is anything priced in
+sterling?".
+
+Instead, `--attestation` takes a file of pictures somebody has actually opened:
+
+```
+64835046...  screenshot-1.png  read-by-andy 2026-09-30
+```
+
+The script verifies every staged picture is listed and that none has changed
+since. Recapturing an image then invalidates the attestation instead of silently
+outdating a claim hardcoded in a script. With no attestation supplied it says so
+plainly rather than implying the pictures were checked.
+
 ## Limitations
 
-- Docker is required. There is no native WP-CLI fallback in this harness
+- Docker is required for the WordPress harness. The first-release check above is the exception and needs none
+- There is no native WP-CLI fallback in this harness
 - Official `wordpress:VERSION-phpX.Y-apache` tags do not exist for every pair
 - `wordpress:cli-phpX.Y` must exist for the chosen PHP version
 - Generic tests talk to the WordPress container as `http://wordpress` (Compose network name). The host browser uses `http://localhost:8080`
