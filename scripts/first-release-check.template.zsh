@@ -101,6 +101,135 @@ is_png() {
   [[ "$(od -An -c -N4 -- "$1" 2>/dev/null | tr -d ' ')" == *'211PNG'* ]]
 }
 
+# Every translatable string in one file, and whether its call names $2.
+#
+# Whether a string names the right text domain is a question about the CALL, not
+# about the line the call starts on. PHP lets the arguments run over several
+# lines, and a docblock is free to write __() in prose — and a line-based grep
+# reads both of those as faults. That is worse than having no check at all: a
+# gate that refuses a clean package is a gate somebody learns to skip past, and
+# this one refused four times on a package that was correct.
+#
+# So the file is lexed rather than grepped. HTML outside <?php, line and block
+# comments, single- and double-quoted strings, heredocs and nowdocs are all
+# accounted for, and each call is read from its opening bracket to the bracket
+# that matches it. Only awk and zsh, because this file has to stay runnable on a
+# Mac with nothing installed but Subversion.
+#
+# One line per call: start line, "ok" or "bad", and the opening of the call.
+#
+# What it deliberately does not follow: an i18n call nested inside another i18n
+# call is read as the outer call alone, so a wrong domain on the inner one is
+# seen only if the outer one is wrong too. Sequential calls are read separately,
+# which is the shape that actually occurs.
+i18n_scan() {
+  awk -v want="$2" -v q="'" -v dq='"' '
+    BEGIN {
+      split("__ _e _x _n _nx _ex esc_html__ esc_html_e esc_html_x " \
+            "esc_attr__ esc_attr_e esc_attr_x", fn, " ")
+      for (k in fn) isfn[fn[k]] = 1
+      state = "html"; incall = 0; depth = 0; buf = ""; hd = ""
+    }
+    function report() {
+      hit = index(buf, q want q) > 0 || index(buf, dq want dq) > 0
+      printf "%d\t%s\t%s\n", callline, (hit ? "ok" : "bad"), snippet
+      incall = 0; depth = 0; buf = ""
+    }
+    {
+      line = $0; len = length(line); i = 1
+
+      # A heredoc or nowdoc body ends at a line whose first word is the label.
+      if (state == "heredoc") {
+        t = line; sub(/^[ \t]*/, "", t)
+        if (index(t, hd) == 1) {
+          i = index(line, hd) + length(hd); state = "code"
+        } else {
+          next
+        }
+      }
+
+      while (i <= len) {
+        c  = substr(line, i, 1)
+        c2 = substr(line, i, 2)
+
+        if (state == "html") {
+          p = index(substr(line, i), "<?")
+          if (p == 0) { i = len + 1; continue }
+          i = i + p + 1
+          if (substr(line, i, 3) == "php") i += 3
+          else if (substr(line, i, 1) == "=") i += 1
+          state = "code"; continue
+        }
+
+        if (state == "block") {
+          p = index(substr(line, i), "*/")
+          if (p == 0) { i = len + 1; continue }
+          i = i + p + 1; state = "code"; continue
+        }
+
+        if (state == "sq" || state == "dq") {
+          if (c == "\\") { if (incall) buf = buf c2; i += 2; continue }
+          if (incall) buf = buf c
+          if (c == (state == "sq" ? q : dq)) state = "code"
+          i++; continue
+        }
+
+        # state == "code"
+        if (c2 == "/*")            { state = "block"; i += 2; continue }
+        if (c2 == "//" || c == "#") { i = len + 1; continue }
+        if (c2 == "?>")            { state = "html"; i += 2; continue }
+
+        if (substr(line, i, 3) == "<<<") {
+          rest = substr(line, i + 3); sub(/^[ \t]*/, "", rest)
+          if (substr(rest, 1, 1) == q || substr(rest, 1, 1) == dq) rest = substr(rest, 2)
+          hd = ""
+          for (k = 1; k <= length(rest); k++) {
+            ch = substr(rest, k, 1)
+            if (ch ~ /[A-Za-z0-9_]/) hd = hd ch; else break
+          }
+          if (hd != "") { state = "heredoc"; i = len + 1; continue }
+        }
+
+        if (c == q)  { state = "sq"; if (incall) buf = buf c; i++; continue }
+        if (c == dq) { state = "dq"; if (incall) buf = buf c; i++; continue }
+
+        if (incall) {
+          buf = buf c
+          if (c == "(") depth++
+          else if (c == ")") { depth--; if (depth == 0) report() }
+          i++; continue
+        }
+
+        if (c ~ /[A-Za-z_]/) {
+          id = ""; k = i
+          while (k <= len) {
+            ch = substr(line, k, 1)
+            if (ch ~ /[A-Za-z0-9_]/) { id = id ch; k++ } else break
+          }
+          j = k
+          while (j <= len && substr(line, j, 1) ~ /[ \t]/) j++
+          prev = (i > 1) ? substr(line, i - 1, 1) : ""
+          if ((id in isfn) && substr(line, j, 1) == "(" \
+              && prev != ">" && prev != ":" && prev != "$") {
+            incall = 1; depth = 1; buf = "("; callline = NR
+            snippet = substr(line, i, 60)
+            i = j + 1; continue
+          }
+          i = k; continue
+        }
+        i++
+      }
+
+      # An unterminated string cannot run past its own line in PHP, so leaving
+      # that state at the line end keeps one bad quote from silencing the file.
+      if (state == "sq" || state == "dq") state = "code"
+    }
+    # A call left open at the end of the file is a parse this cannot follow, and
+    # is reported rather than dropped: silence there would read as a clean file.
+    END { if (incall) printf "%d\tbad\t%s\n", callline, snippet }
+  ' "$1"
+}
+
 print -- ""
 print -- "@@PRODUCT@@ $VER — staged first release"
 print -- "=============================================="
@@ -228,15 +357,21 @@ else
   bad DOMAIN "cannot read a Text Domain without a main plugin file."
 fi
 
-i18n='\b(__|_e|_x|_n|_nx|_ex|esc_html__|esc_html_e|esc_html_x|esc_attr__|esc_attr_e|esc_attr_x)\('
-total=$(grep -rhoE "$i18n" trunk --include='*.php' 2>/dev/null | grep -c .)
-wrong=$(grep -rnE "$i18n" trunk --include='*.php' 2>/dev/null | grep -v "$SLUG")
+total=0
+typeset -a wrong
+wrong=()
+for f in trunk/**/*.php; do
+  while IFS=$'\t' read -r cl verdict snip; do
+    (( total++ ))
+    [[ "$verdict" == bad ]] && wrong+=( "$f:$cl: $snip" )
+  done < <(i18n_scan "$f" "$SLUG")
+done
 note "translatable strings in the code: $total"
-if [[ -z "$wrong" ]]; then
+if (( ${#wrong} == 0 )); then
   note "every one of them names $SLUG."
 else
   bad DOMAIN-CODE "these translatable strings do not name $SLUG, so they would never translate:"
-  print -r -- "$wrong" | sed 's/^/     /' | head -20
+  print -rl -- ${wrong[1,20]} | sed 's/^/     /'
 fi
 
 loadline=$(grep -rA2 -h 'load_plugin_textdomain' trunk --include='*.php' 2>/dev/null)
